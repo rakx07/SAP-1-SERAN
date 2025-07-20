@@ -76,6 +76,24 @@
                     @endforeach
                 </tbody>
             </table>
+
+            {{-- Animated Instruction Flow --}}
+            @if(session('execution_flow'))
+                <div class="card shadow-sm mt-4">
+                    <div class="card-header bg-dark text-white">Instruction Flow Animation</div>
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap gap-3">
+                            @foreach(session('execution_flow') as $step => $value)
+                                <div class="border rounded p-2 bg-light text-center animate-step">
+                                    <strong>{{ strtoupper($step) }}</strong><br>
+                                    <span class="text-muted">{{ $value }}</span>
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                </div>
+            @endif
+
         </div>
 
         {{-- RIGHT: Memory Table --}}
@@ -127,3 +145,16 @@
         </div>
     </div>
 @endif
+
+@push('styles')
+<style>
+    .animate-step {
+        animation: popIn 0.5s ease forwards;
+        opacity: 0;
+    }
+    @keyframes popIn {
+        from { transform: scale(0.8); opacity: 0; }
+        to { transform: scale(1); opacity: 1; }
+    }
+</style>
+@endpush

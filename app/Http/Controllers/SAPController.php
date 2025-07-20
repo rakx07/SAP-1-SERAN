@@ -81,32 +81,54 @@ class SAPController extends Controller
     $opcodes = Opcode::pluck('value', 'name')->toArray();
     $active = '';
 
+    $executionFlow = [
+        'PC' => $address,
+        'MAR1' => $address,
+        'ROM1' => $instruction->instruction,
+        'IR' => $binary,
+        'CU' => $opcodeBin,
+    ];
+
     if ($opcodeBin === $opcodes['LDA']) {
         $memory = Memory::where('address', $operand)->first();
-        $AX = $memory ? bindec(str_replace(' ', '', $memory->value ?? $memory->instruction)) : 0;
+        $value = $memory ? str_replace(' ', '', $memory->value ?? $memory->instruction) : '00000000';
+        $AX = bindec($value);
+        $executionFlow['MAR2'] = $operand;
+        $executionFlow['ROM2'] = $value;
+        $executionFlow['AX'] = $AX;
         $active = 'LDA';
 
     } elseif ($opcodeBin === $opcodes['ADD']) {
         $memory = Memory::where('address', $operand)->first();
         $BX = $memory ? bindec(str_replace(' ', '', $memory->value ?? $memory->instruction)) : 0;
         $AX = $AX + $BX;
+        $executionFlow['MAR2'] = $operand;
+        $executionFlow['ROM2'] = str_replace(' ', '', $memory->value ?? $memory->instruction);
+        $executionFlow['AX'] = $AX;
+        $executionFlow['BX'] = $BX;
         $active = 'ADD';
 
     } elseif ($opcodeBin === $opcodes['SUB']) {
         $memory = Memory::where('address', $operand)->first();
         $BX = $memory ? bindec(str_replace(' ', '', $memory->value ?? $memory->instruction)) : 0;
         $AX = $AX - $BX;
+        $executionFlow['MAR2'] = $operand;
+        $executionFlow['ROM2'] = str_replace(' ', '', $memory->value ?? $memory->instruction);
+        $executionFlow['AX'] = $AX;
+        $executionFlow['BX'] = $BX;
         $active = 'SUB';
 
     } elseif ($opcodeBin === $opcodes['OUT']) {
+        $executionFlow['AX'] = $AX;
+        $executionFlow['BX'] = $BX;
         $active = 'OUT';
-      session([
-    'out_display' => [
-        'PC' => $address,
-        'AX' => $AX,
-        'BX' => $BX,
-    ]
-]);
+        session([
+            'out_display' => [
+                'PC' => $address,
+                'AX' => $AX,
+                'BX' => $BX,
+            ]
+        ]);
 
     } elseif ($opcodeBin === $opcodes['HLT']) {
         $active = 'HLT';
@@ -123,6 +145,7 @@ class SAPController extends Controller
     ]);
 
     session([
+        'execution_flow' => $executionFlow,
         "AX_{$address}" => $AX,
         "BX_{$address}" => $BX,
         'AX' => $AX,
@@ -132,6 +155,7 @@ class SAPController extends Controller
 
     return redirect()->route('sap.view');
 }
+
 
     public function runAll()
     {
