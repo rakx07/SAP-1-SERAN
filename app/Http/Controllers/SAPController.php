@@ -188,4 +188,9 @@ class SAPController extends Controller
         session()->forget('out_display');
         return redirect()->route('sap.view');
     }
+    public function clearFlow()
+{
+    session()->forget('execution_flow');
+    return redirect()->route('sap.view');
+}
 }

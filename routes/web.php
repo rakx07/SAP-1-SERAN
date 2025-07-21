@@ -32,3 +32,5 @@ Route::post('/sap/clear-out', function () {
     return redirect()->route('sap.view');
 })->name('sap.clear.out');
 Route::post('/sap/reset', [SAPController::class, 'reset'])->name('sap.reset');
+
+Route::post('/sap/flow/clear', [SAPController::class, 'clearFlow'])->name('sap.flow.clear');
