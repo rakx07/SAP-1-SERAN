@@ -12,6 +12,7 @@ Route::get('/', function () {
 // MAIN DASHBOARD VIEW
 Route::get('/sap', [SAPController::class, 'view'])->name('sap.view');
 
+
 // STEP-BY-STEP SIMULATION
 Route::post('/sap/step', [SAPController::class, 'step'])->name('sap.step');
 
