@@ -57,8 +57,8 @@
                                 @foreach(explode(' | ', $log->description) as $status)
                                     @php
                                         $parts = explode(':', $status);
-                                        $controller = trim($parts[0]);
-                                        $state = trim($parts[1]);
+                                        $controller = trim($parts[0] ?? 'Unknown');
+                                        $state = trim($parts[1] ?? 'N/A');
                                         $class = $state === 'active' ? 'bg-success text-white px-2 py-1 rounded' : 'bg-warning text-dark px-2 py-1 rounded';
                                     @endphp
                                     <span class="{{ $class }}">{{ $controller }}: {{ $state }}</span>

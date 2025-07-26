@@ -56,114 +56,110 @@ class SAPController extends Controller
     }
 
     public function step(Request $request = null)
-{
-    $PC = session('PC', 0);
-    $AX = session('AX', 0);
-    $BX = session('BX', 0);
+    {
+        $PC = session('PC', 0);
+        $AX = session('AX', 0);
+        $BX = session('BX', 0);
 
-    $address = str_pad(decbin($PC), 4, '0', STR_PAD_LEFT);
-    $instruction = Memory::where('address', $address)->first();
+        $address = str_pad(decbin($PC), 4, '0', STR_PAD_LEFT);
+        $instruction = Memory::where('address', $address)->first();
 
-    if (!$instruction || !$instruction->instruction) {
-        session(['done' => true]);
-        return redirect()->route('sap.view');
-    }
+        if (!$instruction || !$instruction->instruction) {
+            session(['done' => true]);
+            return redirect()->route('sap.view');
+        }
 
-    $binary = str_replace(' ', '', $instruction->instruction);
-    if (strlen($binary) < 8) {
-        session(['done' => true]);
-        return redirect()->route('sap.view');
-    }
+        $binary = str_replace(' ', '', $instruction->instruction);
+        if (strlen($binary) < 8) {
+            session(['done' => true]);
+            return redirect()->route('sap.view');
+        }
 
-    $opcodeBin = substr($binary, 0, 4);
-    $operand = substr($binary, 4, 4);
+        $opcodeBin = substr($binary, 0, 4);
+        $operand = substr($binary, 4, 4);
+        $opcodes = Opcode::pluck('value', 'name')->toArray();
+        $executionFlow = [
+            'PC' => $address,
+            'MAR1' => $address,
+            'ROM1' => $instruction->instruction,
+            'IR' => $binary,
+            'CU' => $opcodeBin,
+        ];
 
-    $opcodes = Opcode::pluck('value', 'name')->toArray();
-    $active = '';
+        $active = 'UNKNOWN';
 
-    $executionFlow = [
-        'PC' => $address,
-        'MAR1' => $address,
-        'ROM1' => $instruction->instruction,
-        'IR' => $binary,
-        'CU' => $opcodeBin,
-    ];
+        if ($opcodeBin === $opcodes['LDA']) {
+            $memory = Memory::where('address', $operand)->first();
+            $value = $memory ? str_replace(' ', '', $memory->value ?? $memory->instruction) : '00000000';
+            $AX = bindec($value);
+            $executionFlow['MAR2'] = $operand;
+            $executionFlow['ROM2'] = $value;
+            $executionFlow['AX'] = $AX;
+            $active = 'LDA';
 
-    if ($opcodeBin === $opcodes['LDA']) {
-        $memory = Memory::where('address', $operand)->first();
-        $value = $memory ? str_replace(' ', '', $memory->value ?? $memory->instruction) : '00000000';
-        $AX = bindec($value);
-        $executionFlow['MAR2'] = $operand;
-        $executionFlow['ROM2'] = $value;
-        $executionFlow['AX'] = $AX;
-        $active = 'LDA';
+        } elseif ($opcodeBin === $opcodes['ADD']) {
+            AddController::execute($operand, $AX, $BX, $address);
+            $executionFlow['MAR2'] = $operand;
+            $executionFlow['ROM2'] = str_replace(' ', '', Memory::where('address', $operand)->value('value'));
+            $executionFlow['AX'] = $AX;
+            $executionFlow['BX'] = $BX;
+            $active = 'ADD';
 
-    } elseif ($opcodeBin === $opcodes['ADD']) {
-        $memory = Memory::where('address', $operand)->first();
-        $BX = $memory ? bindec(str_replace(' ', '', $memory->value ?? $memory->instruction)) : 0;
-        $AX = $AX + $BX;
-        $executionFlow['MAR2'] = $operand;
-        $executionFlow['ROM2'] = str_replace(' ', '', $memory->value ?? $memory->instruction);
-        $executionFlow['AX'] = $AX;
-        $executionFlow['BX'] = $BX;
-        $active = 'ADD';
+        } elseif ($opcodeBin === $opcodes['SUB']) {
+            SubtractController::execute($operand, $AX, $BX, $address);
+            $executionFlow['MAR2'] = $operand;
+            $executionFlow['ROM2'] = str_replace(' ', '', Memory::where('address', $operand)->value('value'));
+            $executionFlow['AX'] = $AX;
+            $executionFlow['BX'] = $BX;
+            $active = 'SUB';
 
-    } elseif ($opcodeBin === $opcodes['SUB']) {
-        $memory = Memory::where('address', $operand)->first();
-        $BX = $memory ? bindec(str_replace(' ', '', $memory->value ?? $memory->instruction)) : 0;
-        $AX = $AX - $BX;
-        $executionFlow['MAR2'] = $operand;
-        $executionFlow['ROM2'] = str_replace(' ', '', $memory->value ?? $memory->instruction);
-        $executionFlow['AX'] = $AX;
-        $executionFlow['BX'] = $BX;
-        $active = 'SUB';
+        } elseif ($opcodeBin === $opcodes['OUT']) {
+            OutController::execute($address, $AX, $BX);
+            $executionFlow['AX'] = $AX;
+            $executionFlow['BX'] = $BX;
+            $active = 'OUT';
 
-    } elseif ($opcodeBin === $opcodes['OUT']) {
-        $executionFlow['AX'] = $AX;
-        $executionFlow['BX'] = $BX;
-        $active = 'OUT';
-        session([
-            'out_display' => [
-                'PC' => $address,
-                'AX' => $AX,
-                'BX' => $BX,
-            ]
+        } elseif ($opcodeBin === $opcodes['HLT']) {
+            HltController::execute($address);
+            $executionFlow['AX'] = $AX;
+            $executionFlow['BX'] = $BX;
+            $active = 'HLT';
+        }
+
+        // Save step log for all instructions including OUT and HLT
+        ExecutionLog::create([
+            'pc_address' => $address,
+            'active_controller' => $active,
+            'step' => "PC {$address}",
+            'description' => collect(['LDA', 'ADD', 'SUB', 'OUT', 'HLT'])
+                ->map(fn($c) => "$c: " . ($c === $active ? 'active' : 'inactive'))
+                ->implode(' | ')
         ]);
 
-    } elseif ($opcodeBin === $opcodes['HLT']) {
-        $active = 'HLT';
-        session(['done' => true]);
+        // Save AX/BX values per PC in session for trace display
+        session([
+            "AX_{$address}" => $AX,
+            "BX_{$address}" => $BX,
+            'execution_flow' => $executionFlow,
+            'AX' => $AX,
+            'BX' => $BX,
+            'PC' => $PC + 1
+        ]);
+
+        return redirect()->route('sap.view');
     }
-
-    ExecutionLog::create([
-        'pc_address' => $address,
-        'active_controller' => $active,
-        'step' => "PC {$address}",
-        'description' => collect(['LDA', 'ADD', 'SUB', 'OUT', 'HLT'])
-            ->map(fn($c) => "$c: " . ($c === $active ? 'active' : 'inactive'))
-            ->implode(' | ')
-    ]);
-
-    session([
-        'execution_flow' => $executionFlow,
-        "AX_{$address}" => $AX,
-        "BX_{$address}" => $BX,
-        'AX' => $AX,
-        'BX' => $BX,
-        'PC' => $PC + 1
-    ]);
-
-    return redirect()->route('sap.view');
-}
-
 
     public function runAll()
     {
         session(['PC' => 0, 'AX' => 0, 'BX' => 0, 'done' => false]);
         ExecutionLog::truncate();
 
-        while (!session('done', false)) {
+        $max = Memory::count();
+        $counter = 0;
+
+        while ($counter < $max) {
             $this->step(new Request());
+            $counter++;
         }
 
         return redirect()->route('sap.view');
@@ -188,9 +184,10 @@ class SAPController extends Controller
         session()->forget('out_display');
         return redirect()->route('sap.view');
     }
+
     public function clearFlow()
-{
-    session()->forget('execution_flow');
-    return redirect()->route('sap.view');
-}
+    {
+        session()->forget('execution_flow');
+        return redirect()->route('sap.view');
+    }
 }
