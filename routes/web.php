@@ -35,3 +35,5 @@ Route::post('/sap/clear-out', function () {
 Route::post('/sap/reset', [SAPController::class, 'reset'])->name('sap.reset');
 
 Route::post('/sap/flow/clear', [SAPController::class, 'clearFlow'])->name('sap.flow.clear');
+
+Route::post('/sap/last-step', [SAPController::class, 'backStep'])->name('sap.last.step');

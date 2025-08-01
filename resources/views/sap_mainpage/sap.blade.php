@@ -5,89 +5,117 @@
     <h2 class="mb-4 text-center">SAP Simulator</h2>
 
     <div class="row">
-        {{-- LEFT COLUMN: controls, status and trace --}}
+        {{-- LEFT COLUMN: controls, status, trace --}}
         <div class="col-lg-8 col-md-7 col-sm-12 mb-4">
             <div class="mb-3">
-                <strong>AX (decimal):</strong> {{ session('AX', 0) }}
+                <strong>AX (dec):</strong> {{ session('AX', 0) }}
                 &nbsp;&nbsp;
-                <strong>BX (decimal):</strong> {{ session('BX', 0) }}
+                <strong>BX (dec):</strong> {{ session('BX', 0) }}
             </div>
 
             <div class="d-flex flex-wrap gap-3 mb-4">
-                <form method="POST" action="{{ route('sap.step') }}"> @csrf
-                    <button type="submit" class="btn btn-primary" {{ session('done') ? 'disabled' : '' }}>Next Step</button>
+                <form method="POST" action="{{ route('sap.step') }}">
+                    @csrf
+                    <button type="submit" class="btn btn-primary" {{ session('done') ? 'disabled' : '' }}>
+                        Next Step
+                    </button>
                 </form>
-                <form method="POST" action="{{ route('sap.reset') }}"> @csrf
+
+                <form method="POST" action="{{ route('sap.last.step') }}">
+                    @csrf
+                    <button type="submit" class="btn btn-secondary"
+                        {{ empty(session('history', [])) ? 'disabled' : '' }}>
+                        Previous Step
+                    </button>
+                </form>
+
+                <form method="POST" action="{{ route('sap.reset') }}">
+                    @csrf
                     <button type="submit" class="btn btn-warning">Reset Session</button>
                 </form>
-                <form method="POST" action="{{ route('sap.runAll') }}"> @csrf
-                    <button type="submit" class="btn btn-success" {{ session('done') ? 'disabled' : '' }}>Run All</button>
+
+                <form method="POST" action="{{ route('sap.runAll') }}">
+                    @csrf
+                    <button type="submit" class="btn btn-success" {{ session('done') ? 'disabled' : '' }}>
+                        Run All
+                    </button>
                 </form>
-                <form method="POST" action="{{ route('sap.flow.clear') }}"> @csrf
+
+                <form method="POST" action="{{ route('sap.flow.clear') }}">
+                    @csrf
                     <button type="submit" class="btn btn-outline-dark">Clear Flow</button>
                 </form>
+
                 <form method="GET" action="{{ route('sap.upload.form') }}">
                     <button type="submit" class="btn btn-secondary">Upload Excel</button>
                 </form>
             </div>
 
             @if(session('done'))
-                <div class="alert alert-success">Simulation complete. You may reset the session to run again.</div>
+                <div class="alert alert-success">
+                    Simulation complete. You may reset the session to run again.
+                </div>
             @endif
 
-            {{-- Execution Trace Table in a scrollable container --}}
+            {{-- Execution Trace Table --}}
             <h4>Execution Trace</h4>
             <div class="table-responsive" style="max-height:45vh; overflow-y:auto;">
-            <table class="table table-bordered table-striped table-hover">
-                <thead class="table-dark">
-                    <tr>
-                        <th class="text-center">PC</th>
-                        <th>Controller</th>
-                        <th class="text-center">AX (dec)</th>
-                        <th class="text-center">BX (dec)</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach(App\Models\ExecutionLog::orderBy('pc_address')->get() as $log)
+                <table class="table table-bordered table-striped table-hover">
+                    <thead class="table-dark">
                         <tr>
-                            <td class="text-center">{{ $log->pc_address }}</td>
-                            <td>{{ $log->active_controller }}</td>
-                            <td class="text-center">{{ session("AX_{$log->pc_address}", 0) }}</td>
-                            <td class="text-center">{{ session("BX_{$log->pc_address}", 0) }}</td>
-                            <td>
-                                <div class="d-flex flex-wrap gap-1">
-                                    @foreach(['LDA','ADD','SUB','OUT','HLT'] as $ctrl)
-                                        @php
-                                            $isActive = $log->active_controller === $ctrl;
-                                            $badgeClass = $isActive
-                                                ? 'bg-success text-white'
-                                                : 'bg-warning text-dark';
-                                        @endphp
-                                        <span class="badge {{ $badgeClass }} px-2 py-1">
-                                            {{ $ctrl }}: {{ $isActive ? 'active' : 'inactive' }}
-                                        </span>
-                                    @endforeach
-                                </div>
-                            </td>
+                            <th class="text-center">PC</th>
+                            <th>Controller</th>
+                            <th class="text-center">AX (dec)</th>
+                            <th class="text-center">BX (dec)</th>
+                            <th>Status</th>
                         </tr>
-                    @endforeach
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        @foreach(App\Models\ExecutionLog::orderBy('pc_address')->get() as $log)
+                            <tr>
+                                <td class="text-center">{{ $log->pc_address }}</td>
+                                <td>{{ $log->active_controller }}</td>
+                                <td class="text-center">{{ session("AX_{$log->pc_address}", 0) }}</td>
+                                <td class="text-center">{{ session("BX_{$log->pc_address}", 0) }}</td>
+                                <td>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        @foreach(['LDA','ADD','SUB','OUT','HLT'] as $ctrl)
+                                            @php
+                                                $isActive = ($log->active_controller === $ctrl);
+                                                $badgeClass = $isActive ? 'bg-success text-white' : 'bg-warning text-dark';
+                                            @endphp
+                                            <span class="badge {{ $badgeClass }} px-2 py-1">
+                                                {{ $ctrl }}: {{ $isActive ? 'active' : 'inactive' }}
+                                            </span>
+                                        @endforeach
+                                    </div>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
         </div>
 
-        </div>
-
-        {{-- RIGHT COLUMN: architecture display with responsive grid --}}
+        {{-- RIGHT COLUMN: architecture layout --}}
         <div class="col-lg-4 col-md-5 col-sm-12 mb-4">
-            <h4 class="text-center">Instruction Flow</h4>
+            {{-- Micro-step badge --}}
+            @php
+                $microMap  = [0 => 'T0', 1 => 'T1', 2 => 'T2', 3 => 'T3', 4 => 'T4', 5 => 'T5'];
+                $currMicro = session('micro_step', 0);
+                $microLabel= $microMap[$currMicro] ?? '';
+            @endphp
+            <h4 class="text-center">
+                Instruction Flow
+                @if($microLabel)
+                    <span class="badge bg-info ms-2">Micro-step: {{ $microLabel }}</span>
+                @endif
+            </h4>
 
             <style>
-                /* responsive grid layout for all boxes */
                 .sap-architecture {
                     display: grid;
                     grid-gap: 10px;
-                    /* auto-fit as many columns as will fit in the container, minimum 150px each */
                     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
                 }
                 .sap-box {
@@ -114,7 +142,6 @@
                 .sap-box .value {
                     font-size: 16px;
                     margin-top: 4px;
-                    color: #000;
                 }
                 .ctrl-signal {
                     display: inline-block;
@@ -136,64 +163,64 @@
             </style>
 
             @php
-                $execFlow   = session('execution_flow', []);
-                $activeBoxes= session('active_boxes', []);
-                $binAX = isset($execFlow['AX']) && $execFlow['AX'] !== null
-                    ? str_pad(decbin(intval($execFlow['AX'])), 8, '0', STR_PAD_LEFT)
+                $flow = session('execution_flow', []);
+                $active = session('active_boxes', []);
+                $binAX = isset($flow['AX']) && $flow['AX'] !== null
+                    ? str_pad(decbin(intval($flow['AX'])), 8, '0', STR_PAD_LEFT)
                     : 'XXXXXXXX';
-                $binBX = isset($execFlow['BX']) && $execFlow['BX'] !== null
-                    ? str_pad(decbin(intval($execFlow['BX'])), 8, '0', STR_PAD_LEFT)
+                $binBX = isset($flow['BX']) && $flow['BX'] !== null
+                    ? str_pad(decbin(intval($flow['BX'])), 8, '0', STR_PAD_LEFT)
                     : 'XXXXXXXX';
             @endphp
 
             <div class="sap-architecture">
-                <div class="sap-box {{ in_array('box-pc', $activeBoxes) ? 'active' : '' }}" id="box-pc">
+                <div class="sap-box {{ in_array('box-pc', $active) ? 'active' : '' }}" id="box-pc">
                     <div class="sap-label">Program Counter</div>
-                    <div class="value">{{ $execFlow['PC'] ?? '----' }}</div>
+                    <div class="value">{{ $flow['PC'] ?? '----' }}</div>
                 </div>
-                <div class="sap-box {{ in_array('box-mar', $activeBoxes) ? 'active' : '' }}" id="box-mar">
+                <div class="sap-box {{ in_array('box-mar', $active) ? 'active' : '' }}" id="box-mar">
                     <div class="sap-label">MAR</div>
-                    <div class="value">{{ $execFlow['MAR2'] ?? ($execFlow['MAR1'] ?? '----') }}</div>
+                    <div class="value">{{ $flow['MAR2'] ?? ($flow['MAR1'] ?? '----') }}</div>
                 </div>
-                <div class="sap-box {{ in_array('box-ram', $activeBoxes) ? 'active' : '' }}" id="box-ram">
+                <div class="sap-box {{ in_array('box-ram', $active) ? 'active' : '' }}" id="box-ram">
                     <div class="sap-label">RAM</div>
-                    <div class="value">{{ $execFlow['ROM2'] ?? ($execFlow['ROM1'] ?? '--------') }}</div>
+                    <div class="value">{{ $flow['ROM2'] ?? ($flow['ROM1'] ?? '--------') }}</div>
                 </div>
-                <div class="sap-box {{ in_array('box-inputreg', $activeBoxes) ? 'active' : '' }}" id="box-inputreg">
+                <div class="sap-box {{ in_array('box-inputreg', $active) ? 'active' : '' }}" id="box-inputreg">
                     <div class="sap-label">Input Register</div>
-                    <div class="value">{{ $execFlow['INREG'] ?? ($execFlow['IR'] ?? '--------') }}</div>
+                    <div class="value">{{ $flow['INREG'] ?? ($flow['IR'] ?? '--------') }}</div>
                 </div>
-                <div class="sap-box {{ in_array('box-control', $activeBoxes) ? 'active' : '' }}" id="box-control">
+                <div class="sap-box {{ in_array('box-control', $active) ? 'active' : '' }}" id="box-control">
                     <div class="sap-label">Control Unit</div>
-                    <div class="value">{{ $execFlow['CU'] ?? '----' }}</div>
+                    <div class="value">{{ $flow['CU'] ?? '----' }}</div>
                 </div>
-                <div class="sap-box {{ in_array('box-bus', $activeBoxes) ? 'active' : '' }}" id="box-bus">
+                <div class="sap-box {{ in_array('box-bus', $active) ? 'active' : '' }}" id="box-bus">
                     <div class="sap-label">Bus</div>
-                    <div class="value">{{ $execFlow['BUS'] ?? '--------' }}</div>
+                    <div class="value">{{ $flow['BUS'] ?? '--------' }}</div>
                 </div>
-                <div class="sap-box {{ in_array('box-areg', $activeBoxes) ? 'active' : '' }}" id="box-areg">
+                <div class="sap-box {{ in_array('box-areg', $active) ? 'active' : '' }}" id="box-areg">
                     <div class="sap-label">A Register</div>
                     <div class="value">{{ $binAX }}</div>
                 </div>
-                <div class="sap-box {{ in_array('box-alureg', $activeBoxes) ? 'active' : '' }}" id="box-alureg">
+                <div class="sap-box {{ in_array('box-alureg', $active) ? 'active' : '' }}" id="box-alureg">
                     <div class="sap-label">ALU</div>
-                    <div class="value">{{ $execFlow['ALU'] ?? '--------' }}</div>
+                    <div class="value">{{ $flow['ALU'] ?? '--------' }}</div>
                 </div>
-                <div class="sap-box {{ in_array('box-breg', $activeBoxes) ? 'active' : '' }}" id="box-breg">
+                <div class="sap-box {{ in_array('box-breg', $active) ? 'active' : '' }}" id="box-breg">
                     <div class="sap-label">B Register</div>
                     <div class="value">{{ $binBX }}</div>
                 </div>
-                <div class="sap-box {{ in_array('box-outputreg', $activeBoxes) ? 'active' : '' }}" id="box-outputreg">
+                <div class="sap-box {{ in_array('box-outputreg', $active) ? 'active' : '' }}" id="box-outputreg">
                     <div class="sap-label">Output Register</div>
-                    <div class="value">{{ $execFlow['OUTREG'] ?? '--------' }}</div>
+                    <div class="value">{{ $flow['OUTREG'] ?? '--------' }}</div>
                 </div>
-                <div class="sap-box {{ in_array('box-binary', $activeBoxes) ? 'active' : '' }}" id="box-binary">
+                <div class="sap-box {{ in_array('box-binary', $active) ? 'active' : '' }}" id="box-binary">
                     <div class="sap-label">Binary Display</div>
-                    <div class="value">{{ $execFlow['BINARY'] ?? '--------' }}</div>
+                    <div class="value">{{ $flow['BINARY'] ?? '--------' }}</div>
                 </div>
             </div>
 
-            {{-- Control signals --}}
+            {{-- Control Signals --}}
             <div class="mt-3 text-center">
                 <h5>Control Signals</h5>
                 @php
@@ -201,16 +228,17 @@
                     $states  = session('control_signals', []);
                 @endphp
                 @foreach($signals as $sig)
-                    @php $isActive = $states[$sig] ?? false; @endphp
-                    <span class="ctrl-signal {{ $isActive ? 'active' : '' }}" id="ctrl-{{ strtolower($sig) }}">{{ $sig }}</span>
+                    @php $on = $states[$sig] ?? false; @endphp
+                    <span class="ctrl-signal {{ $on ? 'active' : '' }}">
+                        {{ $sig }}
+                    </span>
                 @endforeach
             </div>
         </div>
     </div>
 </div>
-@endsection
 
-{{-- OUT Modal --}}
+{{-- OUT modal --}}
 @if(session('out_display'))
 <div class="modal fade show" id="outModal" tabindex="-1" aria-modal="true" style="display: block; background: rgba(0,0,0,0.5);">
     <div class="modal-dialog">
@@ -230,3 +258,4 @@
     </div>
 </div>
 @endif
+@endsection
