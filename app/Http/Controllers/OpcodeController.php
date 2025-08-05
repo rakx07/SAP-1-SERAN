@@ -19,21 +19,26 @@ class OpcodeController extends Controller
     /**
      * Handle updating of existing opcode records.
      */
-    public function update(Request $request)
-    {
-        $validated = $request->validate([
-            'opcodes' => 'required|array',
-        ]);
+   public function update(Request $request)
+{
+    // Validate that opcodes array exists and each value is a 4-digit binary
+    $data = $request->validate([
+        'opcodes' => 'required|array',
+        'opcodes.*' => ['required', 'string', 'regex:/^[01]{4}$/'],
+    ]);
 
-        foreach ($validated['opcodes'] as $id => $fields) {
-            Opcode::find($id)?->update([
-                'name'  => $fields['name'],
-                'value' => $fields['value']
-            ]);
+    // Loop through each submitted ID/value and update the record
+    foreach ($data['opcodes'] as $id => $value) {
+        $opcode = Opcode::find($id);
+        if ($opcode) {
+            $opcode->value = $value;
+            $opcode->save();
         }
-
-        return redirect()->route('sap.view')->with('success', 'Opcodes updated successfully.');
     }
+
+    return redirect()->route('sap.view')
+                     ->with('success', 'Opcodes updated successfully.');
+}
 
     /**
      * Handle addition of a new opcode.
