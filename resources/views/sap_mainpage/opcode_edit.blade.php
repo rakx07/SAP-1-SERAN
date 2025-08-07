@@ -4,6 +4,24 @@
 <div class="container">
     <h2 class="mb-4">SAP Simulator: Edit Opcode Values</h2>
 
+    {{-- Show validation errors --}}
+    @if($errors->any())
+        <div class="alert alert-danger">
+            <ul class="mb-0">
+                @foreach($errors->all() as $error)
+                    <li>{!! $error !!}</li>
+                @endforeach
+            </ul>
+        </div>
+    @endif
+
+    {{-- Show success message --}}
+    @if(session('success'))
+        <div class="alert alert-success">
+            <strong>✅ Success:</strong> {{ session('success') }}
+        </div>
+    @endif
+
     {{-- Form to Update Opcodes --}}
     <form method="POST" action="{{ route('sap.opcodes.update') }}">
         @csrf

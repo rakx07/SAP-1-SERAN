@@ -8,7 +8,7 @@ use App\Models\Opcode;
 class OpcodeController extends Controller
 {
     /**
-     * Optional: Display separate opcode editing form (not used if embedded in SAP view).
+     * Display the opcode editing form.
      */
     public function form()
     {
@@ -19,26 +19,39 @@ class OpcodeController extends Controller
     /**
      * Handle updating of existing opcode records.
      */
-   public function update(Request $request)
-{
-    // Validate that opcodes array exists and each value is a 4-digit binary
-    $data = $request->validate([
-        'opcodes' => 'required|array',
-        'opcodes.*' => ['required', 'string', 'regex:/^[01]{4}$/'],
-    ]);
+    public function update(Request $request)
+    {
+        // Step 1: Validate format first
+        $data = $request->validate([
+            'opcodes' => 'required|array',
+            'opcodes.*' => ['required', 'string', 'regex:/^[01]{4}$/'],
+        ]);
 
-    // Loop through each submitted ID/value and update the record
-    foreach ($data['opcodes'] as $id => $value) {
-        $opcode = Opcode::find($id);
-        if ($opcode) {
-            $opcode->value = $value;
-            $opcode->save();
+        // Step 2: Check for duplicate binary values
+        $values = array_values($data['opcodes']);
+        $duplicates = array_unique(array_diff_assoc($values, array_unique($values)));
+
+        if (!empty($duplicates)) {
+            $dupesStr = implode(', ', $duplicates);
+            return redirect()->route('sap.opcodes.form')
+                             ->withErrors([
+                                 'opcodes' => "⚠️ Duplicated opcode values found: {$dupesStr}."
+                             ])
+                             ->withInput();
         }
-    }
 
-    return redirect()->route('sap.view')
-                     ->with('success', 'Opcodes updated successfully.');
-}
+        // Step 3: Save updates if valid
+        foreach ($data['opcodes'] as $id => $value) {
+            $opcode = Opcode::find($id);
+            if ($opcode) {
+                $opcode->value = $value;
+                $opcode->save();
+            }
+        }
+
+        return redirect()->route('sap.opcodes.form')
+                         ->with('success', 'Opcodes updated successfully.');
+    }
 
     /**
      * Handle addition of a new opcode.
@@ -47,11 +60,12 @@ class OpcodeController extends Controller
     {
         $data = $request->validate([
             'name'  => 'required|string|unique:opcodes,name',
-            'value' => 'required|regex:/^[0-1]{4}$/'
+            'value' => 'required|regex:/^[01]{4}$/'
         ]);
 
         Opcode::create($data);
 
-        return redirect()->route('sap.view')->with('success', 'New opcode added.');
+        return redirect()->route('sap.opcodes.form')
+                         ->with('success', 'New opcode added.');
     }
 }
