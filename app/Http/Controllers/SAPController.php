@@ -15,35 +15,43 @@ use App\Http\Controllers\HltController;
 
 class SAPController extends Controller
 {
-    /**
-     * Display the main SAP simulator page and seed default opcodes if none exist.
-     */
     public function view()
-    {
-        if (Opcode::count() === 0) {
-            $defaults = [
-                ['name' => 'ADD', 'value' => '0101'],
-                ['name' => 'SUB', 'value' => '0010'],
-                ['name' => 'OUT', 'value' => '1100'],
-                ['name' => 'HLT', 'value' => '1111'],
-                ['name' => 'LDA', 'value' => '0000'],
-            ];
-            foreach ($defaults as $opcode) {
-                Opcode::create($opcode);
-            }
+{
+    // Create default opcodes if table is empty
+    if (Opcode::count() === 0) {
+        $defaults = [
+            ['name' => 'ADD', 'value' => '0101'],
+            ['name' => 'SUB', 'value' => '0010'],
+            ['name' => 'OUT', 'value' => '1100'],
+            ['name' => 'HLT', 'value' => '1111'],
+            ['name' => 'LDA', 'value' => '0000'],
+        ];
+        foreach ($defaults as $opcode) {
+            Opcode::create($opcode);
         }
-        $opcodes = Opcode::orderBy('name')->get();
-        return view('sap_mainpage.sap', compact('opcodes'));
     }
+
+    // Force session to default to START (-1) if not yet initialized
+    if (!session()->has('micro_step')) {
+        session([
+            'micro_step' => -1,
+            'execution_flow' => [],
+            'active_boxes' => [],
+            'active_arrows' => [],
+            'control_signals' => $this->sap1ControlSignals(-1),
+        ]);
+    }
+
+    $opcodes = Opcode::orderBy('name')->get();
+    return view('sap_mainpage.sap', compact('opcodes'));
+}
+
 
     public function uploadForm()
     {
         return view('sap_mainpage.upload');
     }
 
-    /**
-     * Handle upload of Excel memory and reset simulation state.
-     */
     public function upload(Request $request)
     {
         $request->validate(['file' => 'required|mimes:xlsx,xls,csv']);
@@ -54,7 +62,7 @@ class SAPController extends Controller
             'PC' => 0,
             'AX' => 0,
             'BX' => 0,
-            'micro_step' => 0,
+            'micro_step' => -1, // Set to -1 for No-op initial
             'done' => false,
             'history' => [],
         ]);
@@ -64,7 +72,7 @@ class SAPController extends Controller
     }
 
     /**
-     * Perform one micro-step, storing history for back-stepping.
+     * Core: SAP micro-steps and control signals (with T-1, bar logic)
      */
     public function step(Request $request = null)
     {
@@ -79,7 +87,7 @@ class SAPController extends Controller
             'PC'     => session('PC', 0),
             'AX'     => session('AX', 0),
             'BX'     => session('BX', 0),
-            'micro_step' => session('micro_step', 0),
+            'micro_step' => session('micro_step', -1),
             'execution_flow'  => session('execution_flow', []),
             'control_signals' => session('control_signals', []),
             'active_boxes'    => session('active_boxes', []),
@@ -96,20 +104,39 @@ class SAPController extends Controller
         $PC   = session('PC', 0);
         $AX   = session('AX', 0);
         $BX   = session('BX', 0);
-        $step = session('micro_step', 0);
+        $step = session('micro_step', -1);
 
-        // All control signals and default inactive state
-        $signalNames = ['Cp','Ep','Lm','Er','Li','Ei','La','Ea','Su','Eu','Lb','Lo','Hlt'];
-        $activeSignals = array_fill_keys($signalNames, false);
-
-        // Execution flow structure
         $execFlow  = session('execution_flow', []);
         $pcAddr    = str_pad(decbin($PC), 4, '0', STR_PAD_LEFT);
         $instrName = session('instr_name', null);
         $operandBin = session('instr_operand_bin', null);
         $opcodeBin  = session('instr_opcode_bin', null);
 
-        /* T0: PC -> Bus -> MAR */
+        // SAP-1 Control Signal Matrix
+        $signalNames = ['Cp','Ep','Lm','Er','Li','Ei','La','Ea','Su','Eu','Lb','Lo','Hlt'];
+        $signals = $this->sap1ControlSignals($step, $instrName);
+
+        // T-1: Initial No Operation (all gray/inactive)
+        if ($step === -1) {
+                $activeSignals = array_fill_keys($signalNames, null); // All signals inactive (gray)
+                [$boxes, $arrows] = $this->computeFlowHighlights(-1, null);
+
+                session([
+                    'execution_flow'    => [],
+                    'control_signals'   => $this->buildControlSignalsWithBar($activeSignals),
+                    'active_boxes'      => $boxes,
+                    'active_arrows'     => $arrows,
+                    'micro_step'        => -1, // ← View will display as "START"
+                    'current_pc_address'=> $pcAddr,
+                ]);
+
+                // AFTER rendering, move to T0
+                session(['micro_step' => 0]);
+
+                return redirect()->route('sap.view');
+            }
+
+        // T0: Fetch MAR ← PC (EpLm = 1)
         if ($step === 0) {
             $busValue = str_pad($pcAddr, 8, '0', STR_PAD_LEFT);
             $execFlow = [
@@ -128,13 +155,12 @@ class SAPController extends Controller
                 'AX'    => $AX,
                 'BX'    => $BX,
             ];
-            $activeSignals['Ep'] = true;
-            $activeSignals['Lm'] = true;
+            $activeSignals = $signals;
             [$boxes,$arrows] = $this->computeFlowHighlights(0, null);
 
             session([
                 'execution_flow'    => $execFlow,
-                'control_signals'   => $this->buildControlSignals($activeSignals),
+                'control_signals'   => $this->buildControlSignalsWithBar($activeSignals),
                 'active_boxes'      => $boxes,
                 'active_arrows'     => $arrows,
                 'micro_step'        => 1,
@@ -143,7 +169,7 @@ class SAPController extends Controller
             return redirect()->route('sap.view');
         }
 
-        /* T1: Fetch instruction into Input Register */
+        // T1: Fetch IR ← (R ← MAR) (ErLi = 1)
         if ($step === 1) {
             $row = Memory::where('address', $pcAddr)->first();
             if (!$row || !$row->instruction) {
@@ -177,13 +203,12 @@ class SAPController extends Controller
             $execFlow['AX']    = $AX;
             $execFlow['BX']    = $BX;
 
-            $activeSignals['Er'] = true;
-            $activeSignals['Li'] = true;
+            $activeSignals = $signals;
             [$boxes,$arrows] = $this->computeFlowHighlights(1, null);
 
             session([
                 'execution_flow'    => $execFlow,
-                'control_signals'   => $this->buildControlSignals($activeSignals),
+                'control_signals'   => $this->buildControlSignalsWithBar($activeSignals),
                 'active_boxes'      => $boxes,
                 'active_arrows'     => $arrows,
                 'micro_step'        => 2,
@@ -194,22 +219,21 @@ class SAPController extends Controller
             return redirect()->route('sap.view');
         }
 
-        /* T2: Increment PC */
+        // T2: (PC) ← (PC) + 1, Cp = 1
         if ($step === 2) {
             $PC++;
             session(['PC' => $PC]);
-
             $execFlow['PC']  = str_pad(decbin($PC), 4, '0', STR_PAD_LEFT);
             $execFlow['BUS'] = null;
             $execFlow['AX']  = $AX;
             $execFlow['BX']  = $BX;
 
-            $activeSignals['Cp'] = true;
+            $activeSignals = $signals;
             [$boxes,$arrows] = $this->computeFlowHighlights(2, null);
 
             session([
                 'execution_flow'   => $execFlow,
-                'control_signals'  => $this->buildControlSignals($activeSignals),
+                'control_signals'  => $this->buildControlSignalsWithBar($activeSignals),
                 'active_boxes'     => $boxes,
                 'active_arrows'    => $arrows,
                 'micro_step'       => 3,
@@ -217,81 +241,49 @@ class SAPController extends Controller
             return redirect()->route('sap.view');
         }
 
-        /* T3: Put operand or AReg onto bus; handle HLT */
+        // T3: Execute cycle for each instruction
         if ($step === 3) {
             $instrName  = session('instr_name', 'UNKNOWN');
             $operandBin = session('instr_operand_bin', '0000');
-
             $execFlow['AX'] = $AX;
             $execFlow['BX'] = $BX;
 
+            $activeSignals = $signals;
             if (in_array($instrName, ['LDA','ADD','SUB'])) {
                 $execFlow['BUS']  = str_pad($operandBin, 8, '0', STR_PAD_LEFT);
                 $execFlow['MAR2'] = $operandBin;
-                $activeSignals['Lm'] = true;
-                $activeSignals['Ei'] = true;
-
-                [$boxes,$arrows] = $this->computeFlowHighlights(3, $instrName);
-                session([
-                    'execution_flow'   => $execFlow,
-                    'control_signals'  => $this->buildControlSignals($activeSignals),
-                    'active_boxes'     => $boxes,
-                    'active_arrows'    => $arrows,
-                    'micro_step'       => 4,
-                ]);
             } elseif ($instrName === 'OUT') {
-                // AReg -> bus -> OutputReg/Binary
                 OutController::execute($pcAddr, $AX, $BX);
                 $bits = str_pad(decbin($AX), 8, '0', STR_PAD_LEFT);
                 $execFlow['BUS']    = $bits;
                 $execFlow['OUTREG'] = $bits;
                 $execFlow['BINARY'] = $bits;
-                $activeSignals['Ea'] = true;
-                $activeSignals['Lo'] = true;
-
-                [$boxes,$arrows] = $this->computeFlowHighlights(3, $instrName);
-                session([
-                    'execution_flow'   => $execFlow,
-                    'control_signals'  => $this->buildControlSignals($activeSignals),
-                    'active_boxes'     => $boxes,
-                    'active_arrows'    => $arrows,
-                    'micro_step'       => 4,
-                ]);
             } elseif ($instrName === 'HLT') {
                 HltController::execute($pcAddr);
                 $execFlow['BUS'] = null;
-                $activeSignals['Hlt'] = true;
-
-                [$boxes,$arrows] = $this->computeFlowHighlights(3, $instrName);
-                session([
-                    'execution_flow'   => $execFlow,
-                    'control_signals'  => $this->buildControlSignals($activeSignals),
-                    'active_boxes'     => $boxes,
-                    'active_arrows'    => $arrows,
-                    'done'             => true,
-                ]);
             } else {
-                // Unknown
                 $execFlow['BUS'] = null;
-                [$boxes,$arrows] = $this->computeFlowHighlights(3, $instrName);
-                session([
-                    'execution_flow'   => $execFlow,
-                    'control_signals'  => $this->buildControlSignals($activeSignals),
-                    'active_boxes'     => $boxes,
-                    'active_arrows'    => $arrows,
-                    'micro_step'       => 4,
-                ]);
             }
+
+            [$boxes,$arrows] = $this->computeFlowHighlights(3, $instrName);
+            session([
+                'execution_flow'   => $execFlow,
+                'control_signals'  => $this->buildControlSignalsWithBar($activeSignals),
+                'active_boxes'     => $boxes,
+                'active_arrows'    => $arrows,
+                'micro_step'       => 4,
+                'done'             => ($instrName === 'HLT')
+            ]);
             return redirect()->route('sap.view');
         }
 
-        /* T4: memory read or none */
+        // T4: Read memory into A or B (or no op for OUT/HLT)
         if ($step === 4) {
             $instrName  = session('instr_name', 'UNKNOWN');
             $operandBin = session('instr_operand_bin', '0000');
-
             $execFlow['AX'] = $AX;
             $execFlow['BX'] = $BX;
+            $activeSignals = $signals;
 
             if ($instrName === 'LDA') {
                 $memory = Memory::where('address', $operandBin)->first();
@@ -306,19 +298,6 @@ class SAPController extends Controller
                 $execFlow['ROM2'] = $bits;
                 $execFlow['AX']   = $AX;
                 $execFlow['BUS']  = $bits;
-                $activeSignals['Er'] = true;
-                $activeSignals['La'] = true;
-
-                [$boxes,$arrows] = $this->computeFlowHighlights(4, $instrName);
-                session([
-                    'AX'               => $AX,
-                    'BX'               => $BX,
-                    'execution_flow'   => $execFlow,
-                    'control_signals'  => $this->buildControlSignals($activeSignals),
-                    'active_boxes'     => $boxes,
-                    'active_arrows'    => $arrows,
-                    'micro_step'       => 5,
-                ]);
             } elseif (in_array($instrName, ['ADD','SUB'])) {
                 $memory = Memory::where('address', $operandBin)->first();
                 $bits = '00000000';
@@ -332,38 +311,29 @@ class SAPController extends Controller
                 $execFlow['ROM2'] = $bits;
                 $execFlow['BX']   = $BX;
                 $execFlow['BUS']  = $bits;
-                $activeSignals['Er'] = true;
-                $activeSignals['Lb'] = true;
-
-                [$boxes,$arrows] = $this->computeFlowHighlights(4, $instrName);
-                session([
-                    'AX'               => $AX,
-                    'BX'               => $BX,
-                    'execution_flow'   => $execFlow,
-                    'control_signals'  => $this->buildControlSignals($activeSignals),
-                    'active_boxes'     => $boxes,
-                    'active_arrows'    => $arrows,
-                    'micro_step'       => 5,
-                ]);
             } else {
                 $execFlow['BUS'] = null;
-                [$boxes,$arrows] = $this->computeFlowHighlights(4, $instrName);
-                session([
-                    'execution_flow'   => $execFlow,
-                    'control_signals'  => $this->buildControlSignals($activeSignals),
-                    'active_boxes'     => $boxes,
-                    'active_arrows'    => $arrows,
-                    'micro_step'       => 5,
-                ]);
             }
+
+            [$boxes,$arrows] = $this->computeFlowHighlights(4, $instrName);
+            session([
+                'AX'               => $AX,
+                'BX'               => $BX,
+                'execution_flow'   => $execFlow,
+                'control_signals'  => $this->buildControlSignalsWithBar($activeSignals),
+                'active_boxes'     => $boxes,
+                'active_arrows'    => $arrows,
+                'micro_step'       => 5,
+            ]);
             return redirect()->route('sap.view');
         }
 
-        /* T5: ALU operations (ADD/SUB) or no-op */
+        // T5: ALU for ADD/SUB, no-op for others
         if ($step === 5) {
             $instrName = session('instr_name', 'UNKNOWN');
             $execFlow['AX'] = $AX;
             $execFlow['BX'] = $BX;
+            $activeSignals = $signals;
 
             if ($instrName === 'ADD') {
                 $AX = ($AX + $BX) % 256;
@@ -371,31 +341,23 @@ class SAPController extends Controller
                 $aluBits          = str_pad(decbin($AX), 8, '0', STR_PAD_LEFT);
                 $execFlow['ALU']  = $aluBits;
                 $execFlow['BUS']  = $aluBits;
-                $activeSignals['La'] = true;
-                $activeSignals['Eu'] = true;
             } elseif ($instrName === 'SUB') {
                 $AX = (($AX - $BX) + 256) % 256;
                 $execFlow['AX']   = $AX;
                 $aluBits          = str_pad(decbin($AX), 8, '0', STR_PAD_LEFT);
                 $execFlow['ALU']  = $aluBits;
                 $execFlow['BUS']  = $aluBits;
-                $activeSignals['La'] = true;
-                $activeSignals['Su'] = true;
-                $activeSignals['Eu'] = true;
             } else {
                 $execFlow['BUS'] = null;
             }
 
             session(['AX' => $AX, 'BX' => $BX]);
-
-            // store final AX/BX per PC for trace
             $pcAddr = session('current_pc_address', $pcAddr);
             session([
                 "AX_{$pcAddr}" => $AX,
                 "BX_{$pcAddr}" => $BX,
             ]);
 
-            // log end-of-instruction
             if (in_array($instrName, ['LDA','ADD','SUB','OUT','HLT'])) {
                 ExecutionLog::create([
                     'pc_address'       => $pcAddr,
@@ -410,7 +372,7 @@ class SAPController extends Controller
             [$boxes,$arrows] = $this->computeFlowHighlights(5, $instrName);
             session([
                 'execution_flow'   => $execFlow,
-                'control_signals'  => $this->buildControlSignals($activeSignals),
+                'control_signals'  => $this->buildControlSignalsWithBar($activeSignals),
                 'active_boxes'     => $boxes,
                 'active_arrows'    => $arrows,
                 'micro_step'       => 0,
@@ -426,6 +388,72 @@ class SAPController extends Controller
         session(['done' => true]);
         return redirect()->route('sap.view');
     }
+    /**
+     * Build SAP-1 control signals with bar (inversion) logic per microstep.
+     * Green (active): bar signals = 0, normal signals = 1.
+     */
+    private function buildControlSignalsWithBar(array $active): array
+    {
+        // SAP-1 bar/normal convention:
+        // Bar signals: ['Lm', 'Er', 'Li', 'Ei', 'La', 'Lb', 'Lo']
+        //   - These are ACTIVE (green) if value == 0
+        // Non-bar: ['Cp', 'Ep', 'Ea', 'Su', 'Eu', 'Hlt']
+        //   - These are ACTIVE (green) if value == 1
+        $bar = ['Lm','Er','Li','Ei','La','Lb','Lo'];
+        $norm= ['Cp','Ep','Ea','Su','Eu','Hlt'];
+
+        $states = [];
+        foreach ($bar as $b)  $states[$b] = isset($active[$b]) ? ($active[$b] === 0) : false;
+        foreach ($norm as $n) $states[$n] = isset($active[$n]) ? ($active[$n] === 1) : false;
+        return $states;
+    }
+
+    /**
+     * SAP-1 microstep control signals table.
+     * Returns correct values for each microstep, as per your diagrams.
+     * Each microstep is a 13-bit control vector: [Cp Ep Lm Er Li Ei La Ea Su Eu Lb Lo Hlt]
+     * - Bar signals: 0=active, 1=inactive
+     * - Non-bar: 1=active, 0=inactive
+     */
+    private function sap1ControlSignals($microstep, $instrName = null)
+{
+    // Default fetch & NOP cycles (T-1 to T2)
+    $common = [
+        -1 => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // START / No Op
+         0 => [ 'Cp'=>0, 'Ep'=>1, 'Lm'=>0, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // T0
+         1 => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>0, 'Li'=>0, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // T1
+         2 => [ 'Cp'=>1, 'Ep'=>1, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // T2
+    ];
+
+    // T3 → T5 depends on instruction
+    if ($microstep === 3) {
+        return match($instrName) {
+            'LDA', 'ADD', 'SUB' => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>0, 'Er'=>1, 'Li'=>1, 'Ei'=>0, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ],
+            'OUT'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>1, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>0, 'Hlt'=>0 ],
+            'HLT'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>1 ],
+            default             => $common[-1],
+        };
+    }
+
+    if ($microstep === 4) {
+        return match($instrName) {
+            'LDA'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>0, 'Li'=>1, 'Ei'=>1, 'La'=>0, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ],
+            'ADD', 'SUB'        => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>0, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>0, 'Lo'=>1, 'Hlt'=>0 ],
+            default             => $common[-1],
+        };
+    }
+
+    if ($microstep === 5) {
+        return match($instrName) {
+            'ADD'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>0, 'Ea'=>0, 'Su'=>0, 'Eu'=>1, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ],
+            'SUB'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>0, 'Ea'=>0, 'Su'=>1, 'Eu'=>1, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ],
+            default             => $common[-1],
+        };
+    }
+
+    return $common[$microstep] ?? $common[-1]; // fallback
+}
+
 
     /**
      * Restore the previous micro-step state from history.
@@ -499,18 +527,12 @@ class SAPController extends Controller
         return redirect()->route('sap.view')->with('success', 'Session reset.');
     }
 
-    /**
-     * Clear OUT modal.
-     */
     public function clearOutModal()
     {
         session()->forget('out_display');
         return redirect()->route('sap.view');
     }
 
-    /**
-     * Clear flow display (boxes and signals).
-     */
     public function clearFlow()
     {
         session()->forget(['execution_flow','control_signals','active_boxes','active_arrows']);
@@ -518,63 +540,47 @@ class SAPController extends Controller
     }
 
     /**
-     * Build control signal states (true/false) for all signals.
-     */
-    private function buildControlSignals(array $active): array
-    {
-        $names = ['Cp','Ep','Lm','Er','Li','Ei','La','Ea','Su','Eu','Lb','Lo','Hlt'];
-        $out = [];
-        foreach ($names as $name) {
-            $out[$name] = $active[$name] ?? false;
-        }
-        return $out;
+ * Determine which boxes to pop (highlight) for each micro-step and instruction.
+ */
+private function computeFlowHighlights(int $step, ?string $instrName): array
+{
+    $boxes = [];
+    $arrows = []; // You can customize for animated arrows if needed
+    switch ($step) {
+        case -1: // T-1: Initial No-op
+            $boxes = []; // no highlights
+            break;
+        case 0: // T0
+            $boxes = ['box-pc','box-bus','box-mar'];
+            break;
+        case 1: // T1
+            $boxes = ['box-mar','box-ram','box-bus','box-inputreg'];
+            break;
+        case 2: // T2
+            $boxes = ['box-pc'];
+            break;
+        case 3:
+            if (in_array($instrName, ['LDA','ADD','SUB'])) {
+                $boxes = ['box-inputreg','box-bus','box-mar'];
+            } elseif ($instrName === 'OUT') {
+                $boxes = ['box-areg','box-bus','box-outputreg','box-binary'];
+            } elseif ($instrName === 'HLT') {
+                $boxes = ['box-control'];
+            }
+            break;
+        case 4:
+            if ($instrName === 'LDA') {
+                $boxes = ['box-ram','box-bus','box-areg'];
+            } elseif ($instrName === 'ADD' || $instrName === 'SUB') {
+                $boxes = ['box-ram','box-bus','box-breg'];
+            }
+            break;
+        case 5:
+            if ($instrName === 'ADD' || $instrName === 'SUB') {
+                $boxes = ['box-alureg','box-bus','box-areg'];
+            }
+            break;
     }
-
-    /**
-     * Determine which boxes to pop (highlight) for each micro-step and instruction.
-     */
-    private function computeFlowHighlights(int $step, ?string $instrName): array
-    {
-        $boxes = [];
-        $arrows = []; // arrows are unused in the final version
-        switch ($step) {
-            case 0:
-                // PC -> Bus -> MAR
-                $boxes = ['box-pc','box-bus','box-mar'];
-                break;
-            case 1:
-                // MAR -> RAM -> Bus -> InputReg
-                $boxes = ['box-mar','box-ram','box-bus','box-inputreg'];
-                break;
-            case 2:
-                // PC increments
-                $boxes = ['box-pc'];
-                break;
-            case 3:
-                if (in_array($instrName, ['LDA','ADD','SUB'])) {
-                    $boxes = ['box-inputreg','box-bus','box-mar'];
-                } elseif ($instrName === 'OUT') {
-                    $boxes = ['box-areg','box-bus','box-outputreg','box-binary'];
-                } elseif ($instrName === 'HLT') {
-                    $boxes = ['box-control'];
-                }
-                break;
-            case 4:
-                if ($instrName === 'LDA') {
-                    $boxes = ['box-ram','box-bus','box-areg'];
-                } elseif ($instrName === 'ADD' || $instrName === 'SUB') {
-                    $boxes = ['box-ram','box-bus','box-breg'];
-                }
-                break;
-            case 5:
-                if ($instrName === 'ADD' || $instrName === 'SUB') {
-                    $boxes = ['box-alureg','box-bus','box-areg'];
-                }
-                break;
-        }
-        return [$boxes, $arrows];
-    }
-
-
-    
+    return [$boxes, $arrows];
+}
 }

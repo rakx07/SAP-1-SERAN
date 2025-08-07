@@ -101,13 +101,13 @@
         <div class="col-lg-4 col-md-5 col-sm-12 mb-4">
             {{-- Micro-step badge --}}
             @php
-                $microMap  = [0 => 'T0', 1 => 'T1', 2 => 'T2', 3 => 'T3', 4 => 'T4', 5 => 'T5'];
+                $microMap  = [-1 => 'START', 0 => 'T0', 1 => 'T1', 2 => 'T2', 3 => 'T3', 4 => 'T4', 5 => 'T5'];
                 $currMicro = session('micro_step', 0);
                 $microLabel= $microMap[$currMicro] ?? '';
             @endphp
             <h4 class="text-center">
                 Instruction Flow
-                @if($microLabel)
+                @if($microLabel !== '')
                     <span class="badge bg-info ms-2">Micro-step: {{ $microLabel }}</span>
                 @endif
             </h4>
@@ -160,6 +160,9 @@
                     border-color: green;
                     font-weight: bold;
                 }
+                .ctrl-bar {
+                    text-decoration: overline;
+                }
             </style>
 
             @php
@@ -171,6 +174,12 @@
                 $binBX = isset($flow['BX']) && $flow['BX'] !== null
                     ? str_pad(decbin(intval($flow['BX'])), 8, '0', STR_PAD_LEFT)
                     : 'XXXXXXXX';
+                // Optional: for bar signals
+                $signals = ['Cp','Ep','Lm','Er','Li','Ei','La','Ea','Su','Eu','Lb','Lo','Hlt'];
+                $labels  = [
+                    'Cp','Ep','Lm̅','Er̅','Li̅','Ei̅','La̅','Ea','Su','Eu','Lb̅','Lo̅','Hlt'
+                ];
+                $states  = session('control_signals', []);
             @endphp
 
             <div class="sap-architecture">
@@ -223,16 +232,17 @@
             {{-- Control Signals --}}
             <div class="mt-3 text-center">
                 <h5>Control Signals</h5>
-                @php
-                    $signals = ['Cp','Ep','Lm','Er','Li','Ei','La','Ea','Su','Eu','Lb','Lo','Hlt'];
-                    $states  = session('control_signals', []);
-                @endphp
-                @foreach($signals as $sig)
+                @foreach($signals as $i => $sig)
                     @php $on = $states[$sig] ?? false; @endphp
                     <span class="ctrl-signal {{ $on ? 'active' : '' }}">
-                        {{ $sig }}
+                        {{ $labels[$i] }}
                     </span>
                 @endforeach
+            </div>
+            {{-- Optional: Show the current binary vector for debugging --}}
+            <div class="mt-2" style="font-family: monospace;">
+                <strong>Control Vector:</strong>
+                {{ implode('', array_map(fn($s) => (int)($states[$s] ?? 0), $signals)) }}
             </div>
         </div>
     </div>
