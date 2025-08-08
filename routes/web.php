@@ -37,3 +37,4 @@ Route::post('/sap/reset', [SAPController::class, 'reset'])->name('sap.reset');
 Route::post('/sap/flow/clear', [SAPController::class, 'clearFlow'])->name('sap.flow.clear');
 
 Route::post('/sap/last-step', [SAPController::class, 'backStep'])->name('sap.last.step');
+Route::put('/memory/{id}', [App\Http\Controllers\MemoryController::class, 'update'])->name('memory.update');

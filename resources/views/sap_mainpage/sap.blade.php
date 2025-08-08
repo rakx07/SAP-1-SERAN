@@ -1,6 +1,11 @@
 @extends('layouts.app')
 
 @section('content')
+@if(session('success'))
+    <div class="alert alert-success">
+        {{ session('success') }}
+    </div>
+@endif
 <div class="container-fluid">
     <h2 class="mb-4 text-center">SAP Simulator</h2>
 
@@ -56,6 +61,41 @@
                     Simulation complete. You may reset the session to run again.
                 </div>
             @endif
+            {{-- BOX 3: Memory Contents --}}
+            <div class="container-fluid mt-4">
+                <h4 class="mb-3 text-center">Memory Contents</h4>
+                <div class="table-responsive" style="height: 155px; overflow-y: auto;">
+                    <table class="table table-bordered table-hover table-sm">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="text-center">Address</th>
+                                <th class="text-center">Instruction</th>
+                                <th class="text-center">Value</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach(App\Models\Memory::orderBy('address')->get() as $mem)
+                                <tr>
+                                    <td class="text-center">{{ $mem->address }}</td>
+                                    <td class="text-center">{{ $mem->instruction }}</td>
+                                    <td class="text-center">
+                                    <button class="btn btn-sm btn-outline-primary"
+                                            data-bs-toggle="modal"
+                                            data-bs-target="#editMemoryModal"
+                                            data-id="{{ $mem->id }}"
+                                            data-address="{{ $mem->address }}"
+                                            data-instruction="{{ $mem->instruction }}"
+                                            data-value="{{ $mem->value }}">
+                                        Edit
+                                    </button>
+                                </td>   
+
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </div>
 
             {{-- Execution Trace Table --}}
             <h4>Execution Trace</h4>
@@ -239,6 +279,7 @@
                     </span>
                 @endforeach
             </div>
+            
             {{-- Optional: Show the current binary vector for debugging --}}
             <div class="mt-2" style="font-family: monospace;">
                 <strong>Control Vector:</strong>
@@ -268,4 +309,58 @@
     </div>
 </div>
 @endif
+
+<!-- Edit Memory Modal -->
+<div class="modal fade" id="editMemoryModal" tabindex="-1" aria-labelledby="editMemoryModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <form method="POST" id="editMemoryForm">
+        @csrf
+        @method('PUT')
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editMemoryModalLabel">Edit Memory Instruction</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="memoryId">
+                <div class="mb-3">
+                    <label class="form-label">Address</label>
+                    <input type="text" name="address" id="memoryAddress" class="form-control"
+                           pattern="[0-9]{4}" title="Enter 4-digit address (e.g., 0001)" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Instruction (8-bit binary)</label>
+                    <input type="text" name="instruction" id="memoryInstruction" class="form-control"
+                           pattern="[01]{8}" title="Enter 8-bit binary (e.g., 01011010)" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            </div>
+        </div>
+    </form>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const modal = document.getElementById('editMemoryModal');
+    modal.addEventListener('show.bs.modal', function (event) {
+        const button = event.relatedTarget;
+        const id = button.getAttribute('data-id');
+        const address = button.getAttribute('data-address');
+        const instruction = button.getAttribute('data-instruction');
+
+        // Populate modal fields
+        document.getElementById('memoryId').value = id;
+        document.getElementById('memoryAddress').value = address;
+        document.getElementById('memoryInstruction').value = instruction;
+
+        // Set form action
+        document.getElementById('editMemoryForm').action = `/memory/${id}`;
+    });
+});
+
+</script>
 @endsection
