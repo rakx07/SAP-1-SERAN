@@ -140,11 +140,20 @@
         {{-- RIGHT COLUMN: architecture layout --}}
         <div class="col-lg-4 col-md-5 col-sm-12 mb-4">
             {{-- Micro-step badge --}}
-            @php
-                $microMap  = [-1 => 'START', 0 => 'T0', 1 => 'T1', 2 => 'T2', 3 => 'T3', 4 => 'T4', 5 => 'T5'];
-                $currMicro = session('micro_step', 0);
-                $microLabel= $microMap[$currMicro] ?? '';
+                        @php
+                $step = session('micro_step', -1);
+
+                if ($step < 0) {
+                    $microLabel = 'START';
+                } else {
+                    // Displayed label is always one step behind
+                    $microLabel = 'T' . max(0, $step - 1);
+                }
+
+                $isStart = ($step < 0);
             @endphp
+
+
             <h4 class="text-center">
                 Instruction Flow
                 @if($microLabel !== '')

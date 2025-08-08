@@ -132,8 +132,9 @@ class SAPController extends Controller
 
                 // AFTER rendering, move to T0
                 session(['micro_step' => 0]);
+                return $this->step();
 
-                return redirect()->route('sap.view');
+                // return redirect()->route('sap.view');
             }
 
         // T0: Fetch MAR ← PC (EpLm = 1)
