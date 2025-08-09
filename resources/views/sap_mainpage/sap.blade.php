@@ -245,7 +245,7 @@
                     <div class="value">{{ $flow['ROM2'] ?? ($flow['ROM1'] ?? '--------') }}</div>
                 </div>
                 <div class="sap-box {{ in_array('box-inputreg', $active) ? 'active' : '' }}" id="box-inputreg">
-                    <div class="sap-label">Input Register</div>
+                    <div class="sap-label">Instruction Register</div>
                     <div class="value">{{ $flow['INREG'] ?? ($flow['IR'] ?? '--------') }}</div>
                 </div>
                 <div class="sap-box {{ in_array('box-control', $active) ? 'active' : '' }}" id="box-control">
