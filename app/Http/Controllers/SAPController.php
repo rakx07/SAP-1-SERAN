@@ -272,9 +272,27 @@ class SAPController extends Controller
                 'outreg_hold'  => $bits,
                 'binary_hold'  => $bits,
                 ]);
+
+                 // NEW: buffer the last OUT, but do NOT show the modal yet
+                session([
+                    'last_out' => [
+                        'PC' => $pcAddr,
+                        'AX' => $AX,
+                        'BX' => $BX,
+                    ],
+                ]);
+                session()->forget('out_display');
+
+
             } elseif ($instrName === 'HLT') {
                 HltController::execute($pcAddr);
                 $execFlow['BUS'] = null;
+
+                 if (session()->has('last_out')) {
+        session(['out_display' => session('last_out')]);
+    }
+
+
             } else {
                 $execFlow['BUS'] = null;
             }
@@ -535,7 +553,7 @@ class SAPController extends Controller
             'AX','BX','PC','done','micro_step','instr_opcode_bin',
             'instr_operand_bin','instr_name','current_pc_address',
             'execution_flow','control_signals','active_boxes','active_arrows',
-            'out_display','history', 'outreg_hold','binary_hold',
+            'out_display','history', 'outreg_hold','binary_hold','last_out',
         ]);
         foreach (ExecutionLog::pluck('pc_address') as $addr) {
             session()->forget("AX_{$addr}");
