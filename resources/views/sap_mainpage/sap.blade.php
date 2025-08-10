@@ -140,7 +140,7 @@
         {{-- RIGHT COLUMN: architecture layout --}}
         <div class="col-lg-4 col-md-5 col-sm-12 mb-4">
             {{-- Micro-step badge --}}
-                        @php
+            @php
                 // Use display_step if available, else fallback to micro_step
                 $step = session('display_step', session('micro_step', -1));
                 $microLabel = ($step < 0) ? 'START' : 'T' . $step;
@@ -364,5 +364,55 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('editMemoryForm').action = `/memory/${id}`;
     });
 });
+</script>
+
+<!-- Run All behaves like auto-clicking Next Step with 500ms delay -->
+<script>
+(function () {
+    const DELAY_MS = 500; // change speed here
+    const CSRF = '{{ csrf_token() }}';
+    const STEP_URL = "{{ route('sap.step') }}";
+    const RUN_ALL_ACTION = "{{ route('sap.runAll') }}";
+    const isDone = {{ session('done') ? 'true' : 'false' }};
+    const autoRun = localStorage.getItem('sap_autoRun') === '1';
+
+    async function postStepOnce() {
+        return fetch(STEP_URL, {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': CSRF,
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+    }
+
+    function scheduleNext() {
+        if (localStorage.getItem('sap_autoRun') !== '1') return;
+        if ({{ session('done') ? 'true' : 'false' }}) {
+            localStorage.removeItem('sap_autoRun');
+            return;
+        }
+        setTimeout(async () => {
+            await postStepOnce();
+            location.reload();
+        }, DELAY_MS);
+    }
+
+    // Intercept the existing Run All form and turn it into auto-stepper
+    document.addEventListener('submit', function (e) {
+        const form = e.target;
+        if (form.matches(`form[action="${RUN_ALL_ACTION}"]`)) {
+            e.preventDefault();
+            if (isDone) return;
+            localStorage.setItem('sap_autoRun', '1');
+            postStepOnce().then(() => location.reload());
+        }
+    });
+
+    // Continue auto-run after each reload until done
+    if (autoRun) {
+        scheduleNext();
+    }
+})();
 </script>
 @endsection
