@@ -423,7 +423,7 @@ class SAPController extends Controller
         -1 => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // START / No Op
          0 => [ 'Cp'=>0, 'Ep'=>1, 'Lm'=>0, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // T0
          1 => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>0, 'Li'=>0, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // T1
-         2 => [ 'Cp'=>1, 'Ep'=>1, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // T2
+         2 => [ 'Cp'=>1, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // T2
     ];
 
     // T3 → T5 depends on instruction
