@@ -7,7 +7,7 @@
     </div>
 @endif
 <div class="container-fluid">
-    <h2 class="mb-4 text-center">SAP Simulator</h2>
+    {{-- <h2 class="mb-4 text-center">SAP Simulator</h2> --}}
 
     <div class="row">
         {{-- LEFT COLUMN: controls, status, trace --}}
