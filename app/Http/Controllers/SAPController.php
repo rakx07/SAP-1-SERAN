@@ -153,8 +153,10 @@ class SAPController extends Controller
                 'BUS'   => $busValue,
                 'INREG' => null,
                 'ALU'   => null,
-                'OUTREG'=> null,
-                'BINARY'=> null,
+                // 'OUTREG'=> null,
+                // 'BINARY'=> null,
+                'OUTREG'=> session('outreg_hold', null),
+                'BINARY'=> session('binary_hold', null),
                 'AX'    => $AX,
                 'BX'    => $BX,
             ];
@@ -265,6 +267,11 @@ class SAPController extends Controller
                 $execFlow['BUS']    = $bits;
                 $execFlow['OUTREG'] = $bits;
                 $execFlow['BINARY'] = $bits;
+
+                session([
+                'outreg_hold'  => $bits,
+                'binary_hold'  => $bits,
+                ]);
             } elseif ($instrName === 'HLT') {
                 HltController::execute($pcAddr);
                 $execFlow['BUS'] = null;
@@ -528,7 +535,7 @@ class SAPController extends Controller
             'AX','BX','PC','done','micro_step','instr_opcode_bin',
             'instr_operand_bin','instr_name','current_pc_address',
             'execution_flow','control_signals','active_boxes','active_arrows',
-            'out_display','history'
+            'out_display','history', 'outreg_hold','binary_hold',
         ]);
         foreach (ExecutionLog::pluck('pc_address') as $addr) {
             session()->forget("AX_{$addr}");
