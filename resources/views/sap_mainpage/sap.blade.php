@@ -141,18 +141,11 @@
         <div class="col-lg-4 col-md-5 col-sm-12 mb-4">
             {{-- Micro-step badge --}}
                         @php
-                $step = session('micro_step', -1);
-
-                if ($step < 0) {
-                    $microLabel = 'START';
-                } else {
-                    // Displayed label is always one step behind
-                    $microLabel = 'T' . max(0, $step - 1);
-                }
-
+                // Use display_step if available, else fallback to micro_step
+                $step = session('display_step', session('micro_step', -1));
+                $microLabel = ($step < 0) ? 'START' : 'T' . $step;
                 $isStart = ($step < 0);
             @endphp
-
 
             <h4 class="text-center">
                 Instruction Flow
@@ -160,6 +153,7 @@
                     <span class="badge bg-info ms-2">Micro-step: {{ $microLabel }}</span>
                 @endif
             </h4>
+
 
             <style>
                 .sap-architecture {
@@ -370,6 +364,5 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('editMemoryForm').action = `/memory/${id}`;
     });
 });
-
 </script>
 @endsection

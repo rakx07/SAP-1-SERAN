@@ -88,6 +88,7 @@ class SAPController extends Controller
             'AX'     => session('AX', 0),
             'BX'     => session('BX', 0),
             'micro_step' => session('micro_step', -1),
+            'display_step' => session('display_step', session('micro_step', -1)), //added 
             'execution_flow'  => session('execution_flow', []),
             'control_signals' => session('control_signals', []),
             'active_boxes'    => session('active_boxes', []),
@@ -126,6 +127,7 @@ class SAPController extends Controller
                     'control_signals'   => $this->buildControlSignalsWithBar($activeSignals),
                     'active_boxes'      => $boxes,
                     'active_arrows'     => $arrows,
+                    'display_step'      => -1, // show START
                     'micro_step'        => -1, // ← View will display as "START"
                     'current_pc_address'=> $pcAddr,
                 ]);
@@ -165,6 +167,7 @@ class SAPController extends Controller
                 'active_boxes'      => $boxes,
                 'active_arrows'     => $arrows,
                 'micro_step'        => 1,
+                 'display_step'      => 0, // show T0 now
                 'current_pc_address'=> $pcAddr,
             ]);
             return redirect()->route('sap.view');
@@ -213,6 +216,7 @@ class SAPController extends Controller
                 'active_boxes'      => $boxes,
                 'active_arrows'     => $arrows,
                 'micro_step'        => 2,
+                 'display_step'      => 1, // show T1 now
                 'instr_opcode_bin'  => $opcodeBin,
                 'instr_operand_bin' => $operandBin,
                 'instr_name'        => $decoded,
@@ -238,6 +242,8 @@ class SAPController extends Controller
                 'active_boxes'     => $boxes,
                 'active_arrows'    => $arrows,
                 'micro_step'       => 3,
+                'display_step'     => 2, // show T2 now
+
             ]);
             return redirect()->route('sap.view');
         }
@@ -272,6 +278,7 @@ class SAPController extends Controller
                 'control_signals'  => $this->buildControlSignalsWithBar($activeSignals),
                 'active_boxes'     => $boxes,
                 'active_arrows'    => $arrows,
+                 'display_step'     => 3, // show T3 now
                 'micro_step'       => 4,
                 'done'             => ($instrName === 'HLT')
             ]);
@@ -324,6 +331,7 @@ class SAPController extends Controller
                 'control_signals'  => $this->buildControlSignalsWithBar($activeSignals),
                 'active_boxes'     => $boxes,
                 'active_arrows'    => $arrows,
+                 'display_step'     => 4, // show T4 now
                 'micro_step'       => 5,
             ]);
             return redirect()->route('sap.view');
@@ -376,6 +384,7 @@ class SAPController extends Controller
                 'control_signals'  => $this->buildControlSignalsWithBar($activeSignals),
                 'active_boxes'     => $boxes,
                 'active_arrows'    => $arrows,
+                'display_step'      => 5, // show T5 now
                 'micro_step'       => 0,
                 'instr_opcode_bin' => null,
                 'instr_operand_bin'=> null,
@@ -469,6 +478,7 @@ class SAPController extends Controller
                 'AX'               => $prev['AX'],
                 'BX'               => $prev['BX'],
                 'micro_step'       => $prev['micro_step'],
+                 'display_step'     => $prev['display_step'], // <-- add this
                 'execution_flow'   => $prev['execution_flow'],
                 'control_signals'  => $prev['control_signals'],
                 'active_boxes'     => $prev['active_boxes'],
