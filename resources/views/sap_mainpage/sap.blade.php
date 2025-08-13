@@ -46,6 +46,13 @@
                     </button>
                 </form>
 
+                {{-- STOP BUTTON (added) --}}
+                <form id="stopRunAllForm">
+                    <button type="button" class="btn btn-danger" id="stopRunAllBtn" disabled>
+                        Stop
+                    </button>
+                </form>
+
                 <form method="POST" action="{{ route('sap.flow.clear') }}">
                     @csrf
                     <button type="submit" class="btn btn-outline-dark">Clear Flow</button>
@@ -386,10 +393,20 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    function toggleStopButton(enable) {
+        const btn = document.getElementById('stopRunAllBtn');
+        if (btn) btn.disabled = !enable;
+    }
+
     function scheduleNext() {
-        if (localStorage.getItem('sap_autoRun') !== '1') return;
+        if (localStorage.getItem('sap_autoRun') !== '1') {
+            // auto-run stopped
+            toggleStopButton(false);
+            return;
+        }
         if ({{ session('done') ? 'true' : 'false' }}) {
             localStorage.removeItem('sap_autoRun');
+            toggleStopButton(false);
             return;
         }
         setTimeout(async () => {
@@ -405,13 +422,26 @@ document.addEventListener('DOMContentLoaded', function () {
             e.preventDefault();
             if (isDone) return;
             localStorage.setItem('sap_autoRun', '1');
+            toggleStopButton(true);
             postStepOnce().then(() => location.reload());
         }
     });
 
+    // Stop button click: clear the auto-run flag (no further steps will be scheduled)
+    const stopBtn = document.getElementById('stopRunAllBtn');
+    if (stopBtn) {
+        stopBtn.addEventListener('click', function () {
+            localStorage.removeItem('sap_autoRun');
+            toggleStopButton(false);
+        });
+    }
+
     // Continue auto-run after each reload until done
     if (autoRun) {
+        toggleStopButton(true);
         scheduleNext();
+    } else {
+        toggleStopButton(false);
     }
 })();
 </script>
