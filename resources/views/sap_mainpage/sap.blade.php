@@ -104,7 +104,7 @@
                 </div>
             </div>
 
-            {{-- Execution Trace Table --}}
+            {{-- Execution Trace --}}
             <h4>Execution Trace</h4>
             <div class="table-responsive" style="max-height:45vh; overflow-y:auto;">
                 <table class="table table-bordered table-striped table-hover">
@@ -149,7 +149,7 @@
             {{-- Micro-step badge --}}
             @php
                 // Use display_step if available, else fallback to micro_step
-                $step = session('display_step', session('micro_step', -1));
+                $step = (int) session('display_step', session('micro_step', -1));
                 $microLabel = ($step < 0) ? 'START' : 'T' . $step;
                 $isStart = ($step < 0);
             @endphp
@@ -230,6 +230,34 @@
                     'Cp','Ep','Lm̅','Er̅','Li̅','Ei̅','La̅','Ea','Su','Eu','Lb̅','Lo̅','Hlt'
                 ];
                 $states  = session('control_signals', []);
+
+                // =====================
+                // Control Vector 2 (new)
+                // =====================
+                $cv2 = null;
+                if ($step === 0) {
+                    $cv2 = '0101 1110 0011';
+                } elseif ($step === 1) {
+                    $cv2 = '0010 0110 0011';
+                } elseif ($step === 2) {
+                    $cv2 = '1011 1110 0011';
+                } elseif ($step === 3) {
+                    $cv2 = '0001 1010 0011';
+                } elseif ($step === 4) {
+                    $cv2 = '0010 1100 0011';
+                } elseif ($step === 5) {
+                    // Determine opcode from current instruction register if available
+                    $ir = $flow['INREG'] ?? ($flow['IR'] ?? null); // expected 8-bit string like '00001001'
+                    $opcode = is_string($ir) && strlen($ir) >= 4 ? substr($ir, 0, 4) : null;
+                    if ($opcode === '0000') { // LDA
+                        $cv2 = '00 11 1110 0011';
+                    } elseif ($opcode === '0101' || $opcode === '0010') { // ADD or SUB
+                        $cv2 = '0011 1100 0111';
+                    } else {
+                        // Fallback if opcode unknown at T5
+                        $cv2 = '-------- ---- ----';
+                    }
+                }
             @endphp
 
             <div class="sap-architecture">
@@ -294,6 +322,12 @@
             <div class="mt-2" style="font-family: monospace;">
                 <strong>Control Vector:</strong>
                 {{ implode('', array_map(fn($s) => (int)($states[$s] ?? 0), $signals)) }}
+            </div>
+
+            {{-- NEW: Control Vector 2 (per T0–T5 mapping) --}}
+            <div class="mt-1" style="font-family: monospace;">
+                <strong>Control Vector 2:</strong>
+                {{ $cv2 ?? '-------- ---- ----' }}
             </div>
         </div>
     </div>
