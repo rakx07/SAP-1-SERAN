@@ -216,14 +216,29 @@
             </style>
 
             @php
-                $flow = session('execution_flow', []);
+                // === sticky-aware helpers ===
+                $flow   = session('execution_flow', []);
+                $sticky = session('sticky_flow', []);
                 $active = session('active_boxes', []);
-                $binAX = isset($flow['AX']) && $flow['AX'] !== null
-                    ? str_pad(decbin(intval($flow['AX'])), 8, '0', STR_PAD_LEFT)
-                    : 'XXXXXXXX';
-                $binBX = isset($flow['BX']) && $flow['BX'] !== null
-                    ? str_pad(decbin(intval($flow['BX'])), 8, '0', STR_PAD_LEFT)
-                    : 'XXXXXXXX';
+
+                $show = function($key, $default = '----') use ($flow, $sticky) {
+                    $v = $flow[$key] ?? null;
+                    if ($v !== null && $v !== '' && $v !== '----' && $v !== '--------') return $v;
+                    return array_key_exists($key, $sticky) ? $sticky[$key] : $default;
+                };
+
+                $show8 = function($key) use ($show) {
+                    return $show($key, '--------');
+                };
+
+                // AX/BX binary using sticky fallback
+                $axVal = $show('AX', null);
+                $bxVal = $show('BX', null);
+                $binAX = is_numeric($axVal) ? str_pad(decbin((int)$axVal), 8, '0', STR_PAD_LEFT)
+                                            : (is_string($axVal) ? $axVal : 'XXXXXXXX');
+                $binBX = is_numeric($bxVal) ? str_pad(decbin((int)$bxVal), 8, '0', STR_PAD_LEFT)
+                                            : (is_string($bxVal) ? $bxVal : 'XXXXXXXX');
+
                 // Optional: for bar signals
                 $signals = ['Cp','Ep','Lm','Er','Li','Ei','La','Ea','Su','Eu','Lb','Lo','Hlt'];
                 $labels  = [
@@ -246,15 +261,16 @@
                 } elseif ($step === 4) {
                     $cv2 = '0010 1100 0011';
                 } elseif ($step === 5) {
-                    // Determine opcode from current instruction register if available
-                    $ir = $flow['INREG'] ?? ($flow['IR'] ?? null); // expected 8-bit string like '00001001'
+                    // Determine opcode (prefer live flow, else sticky)
+                    $irLive   = $flow['INREG'] ?? ($flow['IR'] ?? null);
+                    $irSticky = $sticky['INREG'] ?? ($sticky['IR'] ?? null);
+                    $ir = is_string($irLive) && strlen($irLive) >= 4 ? $irLive : $irSticky;
                     $opcode = is_string($ir) && strlen($ir) >= 4 ? substr($ir, 0, 4) : null;
                     if ($opcode === '0000') { // LDA
                         $cv2 = '00 11 1110 0011';
                     } elseif ($opcode === '0101' || $opcode === '0010') { // ADD or SUB
                         $cv2 = '0011 1100 0111';
                     } else {
-                        // Fallback if opcode unknown at T5
                         $cv2 = '-------- ---- ----';
                     }
                 }
@@ -263,27 +279,27 @@
             <div class="sap-architecture">
                 <div class="sap-box {{ in_array('box-pc', $active) ? 'active' : '' }}" id="box-pc">
                     <div class="sap-label">Program Counter</div>
-                    <div class="value">{{ $flow['PC'] ?? '----' }}</div>
+                    <div class="value">{{ $show('PC','----') }}</div>
                 </div>
                 <div class="sap-box {{ in_array('box-mar', $active) ? 'active' : '' }}" id="box-mar">
                     <div class="sap-label">MAR</div>
-                    <div class="value">{{ $flow['MAR2'] ?? ($flow['MAR1'] ?? '----') }}</div>
+                    <div class="value">{{ $show('MAR2', $show('MAR1','----')) }}</div>
                 </div>
                 <div class="sap-box {{ in_array('box-ram', $active) ? 'active' : '' }}" id="box-ram">
                     <div class="sap-label">RAM</div>
-                    <div class="value">{{ $flow['ROM2'] ?? ($flow['ROM1'] ?? '--------') }}</div>
+                    <div class="value">{{ $show('ROM2', $show('ROM1','--------')) }}</div>
                 </div>
                 <div class="sap-box {{ in_array('box-inputreg', $active) ? 'active' : '' }}" id="box-inputreg">
                     <div class="sap-label">Instruction Register</div>
-                    <div class="value">{{ $flow['INREG'] ?? ($flow['IR'] ?? '--------') }}</div>
+                    <div class="value">{{ $show('INREG', $show('IR','--------')) }}</div>
                 </div>
                 <div class="sap-box {{ in_array('box-control', $active) ? 'active' : '' }}" id="box-control">
                     <div class="sap-label">Control Unit</div>
-                    <div class="value">{{ $flow['CU'] ?? '----' }}</div>
+                    <div class="value">{{ $show('CU','----') }}</div>
                 </div>
                 <div class="sap-box {{ in_array('box-bus', $active) ? 'active' : '' }}" id="box-bus">
                     <div class="sap-label">Bus</div>
-                    <div class="value">{{ $flow['BUS'] ?? '--------' }}</div>
+                    <div class="value">{{ $show('BUS','--------') }}</div>
                 </div>
                 <div class="sap-box {{ in_array('box-areg', $active) ? 'active' : '' }}" id="box-areg">
                     <div class="sap-label">A Register</div>
@@ -291,7 +307,7 @@
                 </div>
                 <div class="sap-box {{ in_array('box-alureg', $active) ? 'active' : '' }}" id="box-alureg">
                     <div class="sap-label">ALU</div>
-                    <div class="value">{{ $flow['ALU'] ?? '--------' }}</div>
+                    <div class="value">{{ $show('ALU','--------') }}</div>
                 </div>
                 <div class="sap-box {{ in_array('box-breg', $active) ? 'active' : '' }}" id="box-breg">
                     <div class="sap-label">B Register</div>
@@ -299,11 +315,11 @@
                 </div>
                 <div class="sap-box {{ in_array('box-outputreg', $active) ? 'active' : '' }}" id="box-outputreg">
                     <div class="sap-label">Output Register</div>
-                    <div class="value">{{ $flow['OUTREG'] ?? '--------' }}</div>
+                    <div class="value">{{ $show8('OUTREG') }}</div>
                 </div>
                 <div class="sap-box {{ in_array('box-binary', $active) ? 'active' : '' }}" id="box-binary">
                     <div class="sap-label">Binary Display</div>
-                    <div class="value">{{ $flow['BINARY'] ?? '--------' }}</div>
+                    <div class="value">{{ $show8('BINARY') }}</div>
                 </div>
             </div>
 
@@ -319,14 +335,14 @@
             </div>
             
             {{-- Optional: Show the current binary vector for debugging --}}
-            <div class="mt-2" style="font-family: monospace;">
+            <!-- <div class="mt-2" style="font-family: monospace;">
                 <strong>Control Vector:</strong>
                 {{ implode('', array_map(fn($s) => (int)($states[$s] ?? 0), $signals)) }}
-            </div>
+            </div> -->
 
             {{-- NEW: Control Vector 2 (per T0–T5 mapping) --}}
             <div class="mt-1" style="font-family: monospace;">
-                <strong>Control Vector 2:</strong>
+                <strong>Control Vector Updated:</strong>
                 {{ $cv2 ?? '-------- ---- ----' }}
             </div>
         </div>

@@ -16,35 +16,37 @@ use App\Http\Controllers\HltController;
 class SAPController extends Controller
 {
     public function view()
-{
-    // Create default opcodes if table is empty
-    if (Opcode::count() === 0) {
-        $defaults = [
-            ['name' => 'ADD', 'value' => '0101'],
-            ['name' => 'SUB', 'value' => '0010'],
-            ['name' => 'OUT', 'value' => '1100'],
-            ['name' => 'HLT', 'value' => '1111'],
-            ['name' => 'LDA', 'value' => '0000'],
-        ];
-        foreach ($defaults as $opcode) {
-            Opcode::create($opcode);
+    {
+        // Create default opcodes if table is empty
+        if (Opcode::count() === 0) {
+            $defaults = [
+                ['name' => 'ADD', 'value' => '0101'],
+                ['name' => 'SUB', 'value' => '0010'],
+                ['name' => 'OUT', 'value' => '1100'],
+                ['name' => 'HLT', 'value' => '1111'],
+                ['name' => 'LDA', 'value' => '0000'],
+            ];
+            foreach ($defaults as $opcode) {
+                Opcode::create($opcode);
+            }
         }
-    }
 
-    // Force session to default to START (-1) if not yet initialized
-    if (!session()->has('micro_step')) {
-        session([
-            'micro_step' => -1,
-            'execution_flow' => [],
-            'active_boxes' => [],
-            'active_arrows' => [],
-            'control_signals' => $this->sap1ControlSignals(-1),
-        ]);
-    }
+        // Force session to default to START (-1) if not yet initialized
+        if (!session()->has('micro_step')) {
+            session([
+                'micro_step' => -1,
+                'execution_flow' => [],
+                'active_boxes' => [],
+                'active_arrows' => [],
+                'control_signals' => $this->sap1ControlSignals(-1),
+                // ensure sticky_flow exists
+                'sticky_flow' => session('sticky_flow', []),
+            ]);
+        }
 
-    $opcodes = Opcode::orderBy('name')->get();
-    return view('sap_mainpage.sap', compact('opcodes'));
-}
+        $opcodes = Opcode::orderBy('name')->get();
+        return view('sap_mainpage.sap', compact('opcodes'));
+    }
 
 
     public function uploadForm()
@@ -65,6 +67,8 @@ class SAPController extends Controller
             'micro_step' => -1, // Set to -1 for No-op initial
             'done' => false,
             'history' => [],
+            // keep sticky_flow across uploads as per requirement
+            'sticky_flow' => session('sticky_flow', []),
         ]);
         ExecutionLog::truncate();
 
@@ -119,25 +123,23 @@ class SAPController extends Controller
 
         // T-1: Initial No Operation (all gray/inactive)
         if ($step === -1) {
-                $activeSignals = array_fill_keys($signalNames, null); // All signals inactive (gray)
-                [$boxes, $arrows] = $this->computeFlowHighlights(-1, null);
+            $activeSignals = array_fill_keys($signalNames, null); // All signals inactive (gray)
+            [$boxes, $arrows] = $this->computeFlowHighlights(-1, null);
 
-                session([
-                    'execution_flow'    => [],
-                    'control_signals'   => $this->buildControlSignalsWithBar($activeSignals),
-                    'active_boxes'      => $boxes,
-                    'active_arrows'     => $arrows,
-                    'display_step'      => -1, // show START
-                    'micro_step'        => -1, // ← View will display as "START"
-                    'current_pc_address'=> $pcAddr,
-                ]);
+            session([
+                'execution_flow'    => [],
+                'control_signals'   => $this->buildControlSignalsWithBar($activeSignals),
+                'active_boxes'      => $boxes,
+                'active_arrows'     => $arrows,
+                'display_step'      => -1, // show START
+                'micro_step'        => -1, // ← View will display as "START"
+                'current_pc_address'=> $pcAddr,
+            ]);
 
-                // AFTER rendering, move to T0
-                session(['micro_step' => 0]);
-                return $this->step();
-
-                // return redirect()->route('sap.view');
-            }
+            // AFTER rendering, move to T0
+            session(['micro_step' => 0]);
+            return $this->step();
+        }
 
         // T0: Fetch MAR ← PC (EpLm = 1)
         if ($step === 0) {
@@ -153,8 +155,6 @@ class SAPController extends Controller
                 'BUS'   => $busValue,
                 'INREG' => null,
                 'ALU'   => null,
-                // 'OUTREG'=> null,
-                // 'BINARY'=> null,
                 'OUTREG'=> session('outreg_hold', null),
                 'BINARY'=> session('binary_hold', null),
                 'AX'    => $AX,
@@ -163,13 +163,16 @@ class SAPController extends Controller
             $activeSignals = $signals;
             [$boxes,$arrows] = $this->computeFlowHighlights(0, null);
 
+            // persist sticky snapshot
+            $this->persistSticky($execFlow, $AX, $BX);
+
             session([
                 'execution_flow'    => $execFlow,
                 'control_signals'   => $this->buildControlSignalsWithBar($activeSignals),
                 'active_boxes'      => $boxes,
                 'active_arrows'     => $arrows,
                 'micro_step'        => 1,
-                 'display_step'      => 0, // show T0 now
+                'display_step'      => 0, // show T0 now
                 'current_pc_address'=> $pcAddr,
             ]);
             return redirect()->route('sap.view');
@@ -212,13 +215,16 @@ class SAPController extends Controller
             $activeSignals = $signals;
             [$boxes,$arrows] = $this->computeFlowHighlights(1, null);
 
+            // persist sticky snapshot
+            $this->persistSticky($execFlow, $AX, $BX);
+
             session([
                 'execution_flow'    => $execFlow,
                 'control_signals'   => $this->buildControlSignalsWithBar($activeSignals),
                 'active_boxes'      => $boxes,
                 'active_arrows'     => $arrows,
                 'micro_step'        => 2,
-                 'display_step'      => 1, // show T1 now
+                'display_step'      => 1, // show T1 now
                 'instr_opcode_bin'  => $opcodeBin,
                 'instr_operand_bin' => $operandBin,
                 'instr_name'        => $decoded,
@@ -238,6 +244,9 @@ class SAPController extends Controller
             $activeSignals = $signals;
             [$boxes,$arrows] = $this->computeFlowHighlights(2, null);
 
+            // persist sticky snapshot
+            $this->persistSticky($execFlow, $AX, $BX);
+
             session([
                 'execution_flow'   => $execFlow,
                 'control_signals'  => $this->buildControlSignalsWithBar($activeSignals),
@@ -245,7 +254,6 @@ class SAPController extends Controller
                 'active_arrows'    => $arrows,
                 'micro_step'       => 3,
                 'display_step'     => 2, // show T2 now
-
             ]);
             return redirect()->route('sap.view');
         }
@@ -269,11 +277,11 @@ class SAPController extends Controller
                 $execFlow['BINARY'] = $bits;
 
                 session([
-                'outreg_hold'  => $bits,
-                'binary_hold'  => $bits,
+                    'outreg_hold'  => $bits,
+                    'binary_hold'  => $bits,
                 ]);
 
-                 // NEW: buffer the last OUT, but do NOT show the modal yet
+                // NEW: buffer the last OUT, but do NOT show the modal yet
                 session([
                     'last_out' => [
                         'PC' => $pcAddr,
@@ -282,28 +290,28 @@ class SAPController extends Controller
                     ],
                 ]);
                 session()->forget('out_display');
-
-
             } elseif ($instrName === 'HLT') {
                 HltController::execute($pcAddr);
                 $execFlow['BUS'] = null;
 
-                 if (session()->has('last_out')) {
-        session(['out_display' => session('last_out')]);
-    }
-
-
+                if (session()->has('last_out')) {
+                    session(['out_display' => session('last_out')]);
+                }
             } else {
                 $execFlow['BUS'] = null;
             }
 
             [$boxes,$arrows] = $this->computeFlowHighlights(3, $instrName);
+
+            // persist sticky snapshot
+            $this->persistSticky($execFlow, $AX, $BX);
+
             session([
                 'execution_flow'   => $execFlow,
                 'control_signals'  => $this->buildControlSignalsWithBar($activeSignals),
                 'active_boxes'     => $boxes,
                 'active_arrows'    => $arrows,
-                 'display_step'     => 3, // show T3 now
+                'display_step'     => 3, // show T3 now
                 'micro_step'       => 4,
                 'done'             => ($instrName === 'HLT')
             ]);
@@ -349,6 +357,10 @@ class SAPController extends Controller
             }
 
             [$boxes,$arrows] = $this->computeFlowHighlights(4, $instrName);
+
+            // persist sticky snapshot (use updated AX/BX)
+            $this->persistSticky($execFlow, $AX, $BX);
+
             session([
                 'AX'               => $AX,
                 'BX'               => $BX,
@@ -356,7 +368,7 @@ class SAPController extends Controller
                 'control_signals'  => $this->buildControlSignalsWithBar($activeSignals),
                 'active_boxes'     => $boxes,
                 'active_arrows'    => $arrows,
-                 'display_step'     => 4, // show T4 now
+                'display_step'     => 4, // show T4 now
                 'micro_step'       => 5,
             ]);
             return redirect()->route('sap.view');
@@ -404,6 +416,10 @@ class SAPController extends Controller
             }
 
             [$boxes,$arrows] = $this->computeFlowHighlights(5, $instrName);
+
+            // persist sticky snapshot (after ALU result)
+            $this->persistSticky($execFlow, $AX, $BX);
+
             session([
                 'execution_flow'   => $execFlow,
                 'control_signals'  => $this->buildControlSignalsWithBar($activeSignals),
@@ -423,6 +439,7 @@ class SAPController extends Controller
         session(['done' => true]);
         return redirect()->route('sap.view');
     }
+
     /**
      * Build SAP-1 control signals with bar (inversion) logic per microstep.
      * Green (active): bar signals = 0, normal signals = 1.
@@ -451,44 +468,43 @@ class SAPController extends Controller
      * - Non-bar: 1=active, 0=inactive
      */
     private function sap1ControlSignals($microstep, $instrName = null)
-{
-    // Default fetch & NOP cycles (T-1 to T2)
-    $common = [
-        -1 => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // START / No Op
-         0 => [ 'Cp'=>0, 'Ep'=>1, 'Lm'=>0, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // T0
-         1 => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>0, 'Li'=>0, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // T1
-         2 => [ 'Cp'=>1, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // T2
-    ];
+    {
+        // Default fetch & NOP cycles (T-1 to T2)
+        $common = [
+            -1 => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // START / No Op
+             0 => [ 'Cp'=>0, 'Ep'=>1, 'Lm'=>0, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // T0
+             1 => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>0, 'Li'=>0, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // T1
+             2 => [ 'Cp'=>1, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ], // T2
+        ];
 
-    // T3 → T5 depends on instruction
-    if ($microstep === 3) {
-        return match($instrName) {
-            'LDA', 'ADD', 'SUB' => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>0, 'Er'=>1, 'Li'=>1, 'Ei'=>0, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ],
-            'OUT'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>1, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>0, 'Hlt'=>0 ],
-            'HLT'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>1 ],
-            default             => $common[-1],
-        };
+        // T3 → T5 depends on instruction
+        if ($microstep === 3) {
+            return match($instrName) {
+                'LDA', 'ADD', 'SUB' => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>0, 'Er'=>1, 'Li'=>1, 'Ei'=>0, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ],
+                'OUT'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>1, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>0, 'Hlt'=>0 ],
+                'HLT'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>1 ],
+                default             => $common[-1],
+            };
+        }
+
+        if ($microstep === 4) {
+            return match($instrName) {
+                'LDA'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>0, 'Li'=>1, 'Ei'=>1, 'La'=>0, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ],
+                'ADD', 'SUB'        => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>0, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>0, 'Lo'=>1, 'Hlt'=>0 ],
+                default             => $common[-1],
+            };
+        }
+
+        if ($microstep === 5) {
+            return match($instrName) {
+                'ADD'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>0, 'Ea'=>0, 'Su'=>0, 'Eu'=>1, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ],
+                'SUB'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>0, 'Ea'=>0, 'Su'=>1, 'Eu'=>1, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ],
+                default             => $common[-1],
+            };
+        }
+
+        return $common[$microstep] ?? $common[-1]; // fallback
     }
-
-    if ($microstep === 4) {
-        return match($instrName) {
-            'LDA'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>0, 'Li'=>1, 'Ei'=>1, 'La'=>0, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ],
-            'ADD', 'SUB'        => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>0, 'Li'=>1, 'Ei'=>1, 'La'=>1, 'Ea'=>0, 'Su'=>0, 'Eu'=>0, 'Lb'=>0, 'Lo'=>1, 'Hlt'=>0 ],
-            default             => $common[-1],
-        };
-    }
-
-    if ($microstep === 5) {
-        return match($instrName) {
-            'ADD'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>0, 'Ea'=>0, 'Su'=>0, 'Eu'=>1, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ],
-            'SUB'               => [ 'Cp'=>0, 'Ep'=>0, 'Lm'=>1, 'Er'=>1, 'Li'=>1, 'Ei'=>1, 'La'=>0, 'Ea'=>0, 'Su'=>1, 'Eu'=>1, 'Lb'=>1, 'Lo'=>1, 'Hlt'=>0 ],
-            default             => $common[-1],
-        };
-    }
-
-    return $common[$microstep] ?? $common[-1]; // fallback
-}
-
 
     /**
      * Restore the previous micro-step state from history.
@@ -503,7 +519,7 @@ class SAPController extends Controller
                 'AX'               => $prev['AX'],
                 'BX'               => $prev['BX'],
                 'micro_step'       => $prev['micro_step'],
-                 'display_step'     => $prev['display_step'], // <-- add this
+                'display_step'     => $prev['display_step'], // <-- add this
                 'execution_flow'   => $prev['execution_flow'],
                 'control_signals'  => $prev['control_signals'],
                 'active_boxes'     => $prev['active_boxes'],
@@ -514,6 +530,8 @@ class SAPController extends Controller
                 'current_pc_address'=> $prev['current_pc_address'],
                 'done'             => $prev['done'],
                 'history'          => $history,
+                // keep sticky_flow
+                'sticky_flow'      => session('sticky_flow', []),
             ]);
             session()->forget('out_display');
         }
@@ -532,6 +550,8 @@ class SAPController extends Controller
             'micro_step'=> 0,
             'done'      => false,
             'history'   => [],
+            // keep sticky_flow across runs
+            'sticky_flow' => session('sticky_flow', []),
         ]);
         ExecutionLog::truncate();
 
@@ -545,7 +565,7 @@ class SAPController extends Controller
     }
 
     /**
-     * Reset the simulator state completely.
+     * Reset the simulator state completely (but preserve sticky values).
      */
     public function reset()
     {
@@ -554,13 +574,14 @@ class SAPController extends Controller
             'instr_operand_bin','instr_name','current_pc_address',
             'execution_flow','control_signals','active_boxes','active_arrows',
             'out_display','history', 'outreg_hold','binary_hold','last_out',
+            // DO NOT clear 'sticky_flow'
         ]);
         foreach (ExecutionLog::pluck('pc_address') as $addr) {
             session()->forget("AX_{$addr}");
             session()->forget("BX_{$addr}");
         }
         ExecutionLog::truncate();
-        return redirect()->route('sap.view')->with('success', 'Session reset.');
+        return redirect()->route('sap.view')->with('success', 'Session reset. Sticky values preserved.');
     }
 
     public function clearOutModal()
@@ -572,51 +593,86 @@ class SAPController extends Controller
     public function clearFlow()
     {
         session()->forget(['execution_flow','control_signals','active_boxes','active_arrows']);
-        return redirect()->route('sap.view');
+        // keep sticky_flow
+        return redirect()->route('sap.view')->with('success', 'Flow cleared. Sticky values preserved.');
     }
 
     /**
- * Determine which boxes to pop (highlight) for each micro-step and instruction.
- */
-private function computeFlowHighlights(int $step, ?string $instrName): array
-{
-    $boxes = [];
-    $arrows = []; // You can customize for animated arrows if needed
-    switch ($step) {
-        case -1: // T-1: Initial No-op
-            $boxes = []; // no highlights
-            break;
-        case 0: // T0
-            $boxes = ['box-pc','box-bus','box-mar'];
-            break;
-        case 1: // T1
-            $boxes = ['box-mar','box-ram','box-bus','box-inputreg'];
-            break;
-        case 2: // T2
-            $boxes = ['box-pc'];
-            break;
-        case 3:
-            if (in_array($instrName, ['LDA','ADD','SUB'])) {
-                $boxes = ['box-inputreg','box-bus','box-mar'];
-            } elseif ($instrName === 'OUT') {
-                $boxes = ['box-areg','box-bus','box-outputreg','box-binary'];
-            } elseif ($instrName === 'HLT') {
-                $boxes = ['box-control'];
-            }
-            break;
-        case 4:
-            if ($instrName === 'LDA') {
-                $boxes = ['box-ram','box-bus','box-areg'];
-            } elseif ($instrName === 'ADD' || $instrName === 'SUB') {
-                $boxes = ['box-ram','box-bus','box-breg'];
-            }
-            break;
-        case 5:
-            if ($instrName === 'ADD' || $instrName === 'SUB') {
-                $boxes = ['box-alureg','box-bus','box-areg'];
-            }
-            break;
+     * Determine which boxes to pop (highlight) for each micro-step and instruction.
+     */
+    private function computeFlowHighlights(int $step, ?string $instrName): array
+    {
+        $boxes = [];
+        $arrows = []; // You can customize for animated arrows if needed
+        switch ($step) {
+            case -1: // T-1: Initial No-op
+                $boxes = []; // no highlights
+                break;
+            case 0: // T0
+                $boxes = ['box-pc','box-bus','box-mar'];
+                break;
+            case 1: // T1
+                $boxes = ['box-mar','box-ram','box-bus','box-inputreg'];
+                break;
+            case 2: // T2
+                $boxes = ['box-pc'];
+                break;
+            case 3:
+                if (in_array($instrName, ['LDA','ADD','SUB'])) {
+                    $boxes = ['box-inputreg','box-bus','box-mar'];
+                } elseif ($instrName === 'OUT') {
+                    $boxes = ['box-areg','box-bus','box-outputreg','box-binary'];
+                } elseif ($instrName === 'HLT') {
+                    $boxes = ['box-control'];
+                }
+                break;
+            case 4:
+                if ($instrName === 'LDA') {
+                    $boxes = ['box-ram','box-bus','box-areg'];
+                } elseif ($instrName === 'ADD' || $instrName === 'SUB') {
+                    $boxes = ['box-ram','box-bus','box-breg'];
+                }
+                break;
+            case 5:
+                if ($instrName === 'ADD' || $instrName === 'SUB') {
+                    $boxes = ['box-alureg','box-bus','box-areg'];
+                }
+                break;
+        }
+        return [$boxes, $arrows];
     }
-    return [$boxes, $arrows];
-}
+
+    /**
+     * === NEW: Persist a sticky snapshot of latest real values ===
+     * Only merges legitimate values (non-null/non-placeholder) from the current flow,
+     * plus AX/BX integers when provided.
+     */
+    private function persistSticky(array $flow, ?int $ax = null, ?int $bx = null): void
+    {
+        $sticky = session('sticky_flow', []);
+
+        // keys to persist from execution_flow
+        $persistKeys = [
+            'PC','MAR1','MAR2','ROM1','ROM2','INREG','IR','CU','BUS','ALU','OUTREG','BINARY','AX','BX',
+        ];
+
+        $isReal = function($v) {
+            if ($v === null) return false;
+            if ($v === '') return false;
+            if ($v === '----' || $v === '--------') return false;
+            return true;
+        };
+
+        foreach ($persistKeys as $k) {
+            if (array_key_exists($k, $flow) && $isReal($flow[$k])) {
+                $sticky[$k] = $flow[$k];
+            }
+        }
+
+        // Also persist numeric AX/BX if provided
+        if ($ax !== null) $sticky['AX'] = $ax;
+        if ($bx !== null) $sticky['BX'] = $bx;
+
+        session(['sticky_flow' => $sticky]);
+    }
 }
